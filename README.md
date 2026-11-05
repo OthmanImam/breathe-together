@@ -1,32 +1,73 @@
 # Breathe Together
 
-A wellness breathing coach that watches nothing, tracks you at your own rhythm, and adapts
-a visual breathing pacer to your **live breathing rate** — pacing you gently toward a slower,
-quieter breathing pattern over the course of a short session.
+A wellness breathing coach for the Presage SmartSpectra SDK Challenge (DEV,
+deadline Nov 22, 11:59 PM PST). It follows your breathing rhythm as seen by
+your camera and adapts a breathing pacer to you — easing the pace gently
+toward slow, quiet breathing over the course of a short session.
 
-- **Not a medical device. Not for diagnosis or treatment.** All wording in the app is
-  observation-only; we never frame anything as a health outcome.
-- Personal project for the Presage SmartSpectra SDK Challenge.
+> **Not a medical device. Not for diagnosis or treatment.** Everything in this
+> app is observation-only. There are no scores, verdicts, warnings, or
+> implications about your body — only what the camera saw during the session
+> and how the pacing responded.
 
-## Status (Phase 1)
+## Status — Phase 1 (foundation only)
 
-Foundation only: signal contract, mock signal source, normalizer, coach state machine,
-pacer, and a headless simulation. No UI and no SDK integration yet.
+No UI and no real SDK integration yet. What exists:
+
+- `docs/SDK_NOTES.md` — research on `@smartspectra/node-sdk` (install, auth,
+  metric names and payload shapes, validation codes, telemetry) + open
+  questions.
+- `src/config.ts` — every tunable in one documented place.
+- `src/signal/` — `SignalSource` contract, deterministic mock source (5
+  scenarios), and a normalizer (EMA smoothing, plausibility bounds, spike
+  rejection, confidence gating with hold-then-lost).
+- `src/coach/` — pacer (pure timing, next-boundary rate changes), coach state
+  machine (calibrate → match → lead → hold → cooldown), and an
+  observation-only session summary.
+- `src/sim/` — headless simulation CLI and shared harness running at
+  accelerated virtual time.
 
 ## Run
 
 ```bash
 npm install
-npm run typecheck
-npm run lint
-npm test
+npm run typecheck   # strict TypeScript
+npm run lint        # eslint
+npm test            # node:test suite (48 tests)
 
-# headless simulation (accelerated time, no camera):
+# headless simulation — accelerated time, no camera, prints a timeline:
 npm run simulate -- --scenario agitated_then_settling --minutes 3 --seed 42
 ```
 
-Scenarios: `calm`, `agitated_then_settling`, `ignores_pacer`, `dropout`, `bad_light`.
+Simulation scenarios: `calm`, `agitated_then_settling`, `ignores_pacer`,
+`dropout`, `bad_light`. Options: `--minutes` 3/5/10 (default 3), `--seed`
+integer (same seed = identical run).
 
-`npm run dev` runs the same simulation in watch mode.
+`npm run dev` reruns the agitated-then-settling simulation in watch mode.
 
-See `docs/ARCHITECTURE.md` and `docs/SDK_NOTES.md`.
+## Structure
+
+```
+src/
+  config.ts              all tunables, documented
+  signal/SignalSource.ts contract + types (what the real SDK source will implement)
+  signal/mockSource.ts   seeded, scenario-driven mock
+  signal/normalizer.ts   smoothing, bounds, spikes, hold/lost
+  coach/pacer.ts         inhale/exhale timing as a pure function of time
+  coach/stateMachine.ts  calibrate/match/lead/hold/cooldown + events
+  coach/summary.ts       observation-only wording (regression-tested)
+  sim/harness.ts         deterministic pipeline wiring on a virtual clock
+  sim/run.ts             CLI
+docs/
+  SDK_NOTES.md
+  ARCHITECTURE.md
+```
+
+## Hard rules honored in this repo
+
+- Wellness/relaxation only; all observation wording is deliberately neutral
+  (the wording-safety test enforces a restricted-terms list over summary and
+  notice copy).
+- No SDK API is invented: Phase 1 contains no SDK code; unknowns are in
+  `docs/SDK_NOTES.md`, everything else runs on the mock.
+- No secrets: `.env` is git-ignored; `.env.example` holds only empty keys.
