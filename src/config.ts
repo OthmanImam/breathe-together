@@ -119,6 +119,23 @@ export interface MockSettings {
   badLightConfidence: number;
 }
 
+export interface ServerSettings {
+  /** HTTP/WS port for the local server. Production default; overridable by PORT env. */
+  port: number;
+  /** How often the pacer state is pushed to clients (Hz). ~10 Hz keeps the orb smooth with client-side rAF interpolation, without flooding localhost. */
+  pacerUpdateHz: number;
+  /** Hard cap for a single inbound message (JSON text or binary frame), bytes. Anything bigger is dropped before parsing. */
+  maxMessageBytes: number;
+  /** Sustained control-message rate per connection (msgs/s) and burst allowance. */
+  controlRatePerSec: number;
+  controlBurst: number;
+  /** Sustained camera-frame rate per connection (frames/s) and burst allowance. Should exceed the browser's capture throttle (15 fps) with headroom. */
+  frameRatePerSec: number;
+  frameBurst: number;
+  /** Participant ID prefix for solo rooms (pair mode will reuse rooms with more participants). */
+  soloParticipantId: string;
+}
+
 export interface Settings {
   signal: SignalSettings;
   pacer: PacerSettings;
@@ -129,6 +146,7 @@ export interface Settings {
   cooldown: CooldownSettings;
   session: SessionSettings;
   mock: MockSettings;
+  server: ServerSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -194,6 +212,22 @@ export const DEFAULT_SETTINGS: Settings = {
     badLightFor: 90,
     badLightConfidence: 0.15,
   },
+  server: {
+    port: 3000,
+    // 10 Hz pacer push: the client interpolates between updates with rAF, so
+    // motion stays smooth while the wire carries trivially little. (Chosen
+    // over event-only updates so reconnects resync deterministically.)
+    pacerUpdateHz: 10,
+    // 300 KB covers a full RGBA 320x240 frame (~256 KB) plus a short JSON
+    // control message with room to spare; larger inputs are dropped unread.
+    maxMessageBytes: 300_000,
+    controlRatePerSec: 20,
+    controlBurst: 40,
+    // 20/s sustained tolerates the 15 fps capture cap plus bursts.
+    frameRatePerSec: 20,
+    frameBurst: 30,
+    soloParticipantId: "p1",
+  },
 };
 
 /** Deep-freeze helper so the shared default object can't drift at runtime. */
@@ -226,5 +260,6 @@ export function patchSettings(base: Settings, patch: PartialSettings): Settings 
     cooldown: { ...base.cooldown, ...patch.cooldown },
     session: { ...base.session, ...patch.session },
     mock: { ...base.mock, ...patch.mock },
+    server: { ...base.server, ...patch.server },
   };
 }
