@@ -13,6 +13,7 @@
 import { CameraError, CameraManager } from "./camera.js";
 import { WsClient } from "./wsClient.js";
 import { BreathingAudio } from "./audio.js";
+import { orbStateAt } from "./orb.js";
 import { DEFAULT_SETTINGS } from "../config.js";
 import type {
   ClientSample,
@@ -332,33 +333,27 @@ class App {
     const audioOnly = el<HTMLInputElement>("opt-audio-only").checked;
     const p = this.lastPacer;
     if (p) {
-      const now = performance.now();
-      const cycleMs = (60 / p.rate) * 1000;
-      const inhaleMs = cycleMs * DEFAULT_SETTINGS.pacer.inhaleShare;
-      const phaseMs = p.phase === "inhale" ? inhaleMs : cycleMs - inhaleMs;
-      const extraMs = now - p.receivedAt;
-      const progress = Math.min(
-        1,
-        p.phaseProgress + extraMs / Math.max(1, phaseMs),
+      // Re-anchored on every 10 Hz server snapshot, so drift cannot
+      // accumulate (orb.test.ts proves the bound over 10 minutes).
+      const state = orbStateAt(
+        { rate: p.rate, phase: p.phase, phaseProgress: p.phaseProgress, receivedAtMs: p.receivedAt },
+        performance.now(),
+        DEFAULT_SETTINGS.pacer.inhaleShare,
+        reduced,
       );
-      const ease = (x: number) => x * x * (3 - 2 * x); // smoothstep
-      const scale =
-        p.phase === "inhale"
-          ? 1 + 0.35 * ease(progress)
-          : 1.35 - 0.35 * ease(progress);
-      orb.style.transform = reduced ? `scale(${p.phase === "inhale" ? 1.35 : 1})` : `scale(${scale})`;
+      orb.style.transform = `scale(${state.scale})`;
       const phaseText = el("session-phase");
       phaseText.textContent = audioOnly
-        ? p.phase === "inhale"
+        ? state.phase === "inhale"
           ? "Breathe in…"
           : "Breathe out…"
         : "";
       // Text alternative for the visual, kept current for assistive tech.
       orb.setAttribute(
         "aria-label",
-        `Breathing guide: ${p.phase === "inhale" ? "breathe in" : "breathe out"}`,
+        `Breathing guide: ${state.phase === "inhale" ? "breathe in" : "breathe out"}`,
       );
-      el("orb").style.visibility = audioOnly ? "hidden" : "visible";
+      orb.style.visibility = audioOnly ? "hidden" : "visible";
     }
     this.rafId = requestAnimationFrame(() => this.orbTick());
   }
