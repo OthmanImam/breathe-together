@@ -12,6 +12,7 @@
 
 import { CameraError, CameraManager } from "./camera.js";
 import { WsClient } from "./wsClient.js";
+import { BreathingAudio } from "./audio.js";
 import { DEFAULT_SETTINGS } from "../config.js";
 import type {
   ClientSample,
@@ -48,6 +49,7 @@ function el<T extends HTMLElement>(id: string): T {
 class App {
   private readonly camera = new CameraManager();
   private readonly ws = new WsClient();
+  private readonly audio = new BreathingAudio();
   private readonly frameCanvas = document.createElement("canvas");
   private frameTimer: number | undefined;
   private rafId: number | undefined;
@@ -106,6 +108,18 @@ class App {
     const reduced = el<HTMLInputElement>("opt-reduced-motion");
     reduced.checked = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+    const saveHistory = el<HTMLInputElement>("opt-save-history");
+    saveHistory.checked = localStorage.getItem("bt.historyEnabled") === "1";
+    saveHistory.addEventListener("change", () => {
+      localStorage.setItem("bt.historyEnabled", saveHistory.checked ? "1" : "0");
+    });
+
+    const volume = el<HTMLInputElement>("volume");
+    this.audio.setVolume(Number(volume.value) / 100);
+    volume.addEventListener("input", () => {
+      this.audio.setVolume(Number(volume.value) / 100);
+    });
+
     document
       .querySelectorAll<HTMLInputElement>('input[name="duration"]')
       .forEach((radio) =>
@@ -123,6 +137,11 @@ class App {
       this.showError("The camera stopped unexpectedly. Stopping here — nothing was recorded.");
       this.handleStop(/* silent */ true);
     });
+
+    // Hidden tabs: audio keeps its schedule (tones are the point of
+    // eyes-closed sessions); the orb resyncs from server timestamps on
+    // return because interpolation always measures against the last update.
+    document.addEventListener("visibilitychange", () => undefined);
   }
 
   private showScreen(name: Screen): void {
@@ -165,6 +184,7 @@ class App {
     if (!silent) {
       this.ws.send({ type: "consent_revoked" });
     }
+    this.audio.stop();
     this.camera.stop();
     this.stopFrameLoop();
     this.consentGranted = false;
@@ -178,6 +198,7 @@ class App {
   private handleDisconnect(): void {
     // The session cannot continue without the server; end safely and release
     // the camera rather than leaving it running.
+    this.audio.stop();
     this.camera.stop();
     this.stopFrameLoop();
     this.consentGranted = false;
@@ -193,6 +214,8 @@ class App {
   private handleBegin(): void {
     this.sessionActive = true;
     this.sessionStartedAt = performance.now();
+    // AudioContext may only start from a user gesture — Begin is that gesture.
+    this.audio.ensureStarted();
     this.ws.send({
       type: "start_session",
       durationMin: this.durationMin,
@@ -225,6 +248,12 @@ class App {
           phaseProgress: msg.phaseProgress,
           receivedAt: performance.now(),
         };
+        this.audio.onPacer(
+          msg.phase,
+          msg.rate,
+          DEFAULT_SETTINGS.pacer.inhaleShare,
+          this.audio.currentTime(),
+        );
         this.renderSessionClock();
         break;
       case "state_changed":
@@ -236,6 +265,7 @@ class App {
       case "session_end":
         this.sessionActive = false;
         this.stopOrbLoop();
+        this.audio.stop();
         this.renderSummary(msg.lines);
         this.showScreen("summary");
         break;
@@ -323,6 +353,11 @@ class App {
           ? "Breathe in…"
           : "Breathe out…"
         : "";
+      // Text alternative for the visual, kept current for assistive tech.
+      orb.setAttribute(
+        "aria-label",
+        `Breathing guide: ${p.phase === "inhale" ? "breathe in" : "breathe out"}`,
+      );
       el("orb").style.visibility = audioOnly ? "hidden" : "visible";
     }
     this.rafId = requestAnimationFrame(() => this.orbTick());

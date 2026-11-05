@@ -12,9 +12,9 @@
     "serve": "npm run build:client && tsx src/server/index.ts",
     "build:client": "tsc -p tsconfig.client.json",
     "simulate": "tsx src/sim/run.ts",
-    "test": "node --import tsx --test \"test/*.test.ts\"",
+    "test": "node --import tsx --test \"test/*.test.ts\" \"src/client/*.test.ts\"",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json --noEmit"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

@@ -72,6 +72,11 @@
         </fieldset>
 
         <fieldset class="options">
+          <legend>Session notes</legend>
+          <label><input type="checkbox" id="opt-save-history" /> Save session notes on this device (off by default)</label>
+        </fieldset>
+
+        <fieldset class="options">
           <legend>Mode</legend>
           <label><input type="radio" name="mode" value="solo" checked /> Breathe on my own</label>
           <label class="disabled"><input type="radio" name="mode" value="pair" disabled /> Breathe with someone <span class="soon">(coming soon)</span></label>
@@ -105,6 +110,10 @@
           <span id="session-rate">Your pace: —</span>
           <span id="session-view">View: —</span>
           <span id="session-time">—</span>
+          <label class="volume">
+            Tone volume
+            <input type="range" id="volume" min="0" max="100" value="30" />
+          </label>
         </p>
         <p id="session-notice" class="guidance" aria-live="polite"></p>
       </section>
