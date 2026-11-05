@@ -23,6 +23,9 @@ test("valid messages parse into typed forms", () => {
       "start_session",
     ],
     [{ ...envelope, type: "stop_session" }, "stop_session"],
+    [{ ...envelope, type: "preview_start" }, "preview_start"],
+    [{ ...envelope, type: "preview_stop" }, "preview_stop"],
+    [{ ...envelope, type: "set_scenario", scenario: "calm" }, "set_scenario"],
     [{ ...envelope, type: "ping" }, "ping"],
   ];
   for (const [raw, expectedType] of cases) {
@@ -50,6 +53,8 @@ test("malformed inputs are rejected with codes", () => {
       "invalid_field",
     ],
     [{ ...envelope, type: "hello", clientVersion: 9 }, "invalid_field"],
+    [{ ...envelope, type: "set_scenario" }, "invalid_field"],
+    [{ ...envelope, type: "set_scenario", scenario: "x".repeat(65) }, "invalid_field"],
     [
       { ...envelope, roomId: "bad id with spaces", participantId: "p1", type: "ping" },
       "invalid_field",

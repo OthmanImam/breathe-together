@@ -56,6 +56,11 @@ export type ClientMessage =
   | { type: "consent_revoked" }
   | { type: "start_session"; durationMin: SessionMinutes; mode: SessionMode }
   | { type: "stop_session" }
+  /** Begin streaming normalized samples only (no coach): Setup-screen framing guidance. */
+  | { type: "preview_start" }
+  | { type: "preview_stop" }
+  /** Dev-only: choose which mock scenario the NEXT session uses. Server refuses in production. */
+  | { type: "set_scenario"; scenario: string }
   | { type: "ping" };
 
 // ---------------------------------------------------------------------------
@@ -71,6 +76,8 @@ export type ServerMessage =
       signalSource: "mock" | "sdk";
       /** Populated when the SDK source was requested but unavailable, watched by dev tooling and the UI's small honesty note. */
       signalSourceNote?: string;
+      /** True only when the server offers dev-only mock scenario selection. */
+      devControls: boolean;
     }
   | { type: "sample"; sample: ClientSample }
   | {
@@ -249,6 +256,18 @@ export function parseClientMessage(parsed: unknown): ParsedClientMessage | Parse
     }
     case "stop_session":
       return { ok: true, message: { type: "stop_session" } };
+    case "preview_start":
+      return { ok: true, message: { type: "preview_start" } };
+    case "preview_stop":
+      return { ok: true, message: { type: "preview_stop" } };
+    case "set_scenario": {
+      if (parsed.scenario === undefined) {
+        return fail("invalid_field", "scenario is required");
+      }
+      const s = checkString(parsed.scenario, "scenario", 64);
+      if (s) return s;
+      return { ok: true, message: { type: "set_scenario", scenario: String(parsed.scenario) } };
+    }
     case "ping":
       return { ok: true, message: { type: "ping" } };
     default:

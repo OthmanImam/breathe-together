@@ -147,6 +147,46 @@ export class ParticipantPipeline {
     return this.active;
   }
 
+  /** True while the lightweight preview chain (source + normalizer) is running. */
+  get isPreviewActive(): boolean {
+    return this.previewActive;
+  }
+
+  /**
+   * Preview: run only source -> normalizer and forward samples, with no
+   * coach or pacer. The Setup screen uses this for framing guidance; nothing
+   * here is recorded or summarized.
+   */
+  startPreview(spec: { kind: SourceKind; scenario?: string } = { kind: "mock" }): StartedSource {
+    if (this.previewActive) return this.startedSource ?? { kind: "mock" };
+    if (this.active) this.stopSession();
+    this.previewSettings = patchSettings(this.baseSettings, {});
+    const built = this.createSource(spec, this.previewSettings);
+    this.previewSource = built.source;
+    this.previewNormalizer = new Normalizer(this.previewSettings.signal);
+    this.previewSource.onSample((raw) => {
+      const norm = this.previewNormalizer!.accept(raw);
+      this.emit({ type: "sample", sample: norm });
+    });
+    this.previewSource.start();
+    this.previewActive = true;
+    this.startedSource = { kind: built.kind, ...(built.note ? { note: built.note } : {}) };
+    return this.startedSource;
+  }
+
+  stopPreview(): void {
+    if (!this.previewActive) return;
+    this.previewActive = false;
+    this.previewSource?.stop();
+    this.previewSource = undefined;
+    this.previewNormalizer = undefined;
+  }
+
+  private previewActive = false;
+  private previewSource: SignalSource | undefined;
+  private previewNormalizer: Normalizer | undefined;
+  private previewSettings: Settings | undefined;
+
   get state(): CoachState {
     return this.coach?.state ?? "calibrate";
   }
@@ -161,6 +201,7 @@ export class ParticipantPipeline {
     spec: { kind: SourceKind; scenario?: string } = { kind: "mock" },
   ): StartedSource {
     if (this.active) return this.startedSource ?? { kind: "mock" };
+    if (this.previewActive) this.stopPreview();
     // Fresh settings per session; only the requested duration changes.
     this.sessionSettings = patchSettings(this.baseSettings, {
       session: { defaultMinutes: durationMin },
@@ -204,6 +245,10 @@ export class ParticipantPipeline {
 
   /** `nowMs` must be monotonic. Drives source tick, normalizer holds, pacer. */
   tick(nowMs: number): void {
+    if (this.previewActive && !this.active) {
+      this.previewSource?.tick?.(nowMs);
+      return;
+    }
     if (!this.active) return;
     this.sampleSeenThisTick = false;
     this.source?.tick?.(nowMs);
@@ -227,6 +272,7 @@ export class ParticipantPipeline {
 
   /** Final teardown: stops the source (releases camera-facing resources). */
   destroy(): void {
+    if (this.previewActive) this.stopPreview();
     if (this.active) this.stopSession();
     this.source?.stop();
     this.active = false;

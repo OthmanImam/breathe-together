@@ -4,8 +4,128 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Breathe Together</title>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <p>Placeholder page — the full UI lands in a later step of this phase.</p>
+    <header class="topbar">
+      <span class="brand">Breathe Together</span>
+      <span id="camera-indicator" class="camera-indicator" hidden>
+        <span class="camera-dot" aria-hidden="true"></span>
+        Camera on
+      </span>
+      <button id="stop-button" class="button secondary" hidden>Stop</button>
+    </header>
+
+    <main id="app">
+      <!-- Consent: always the first screen. Nothing touches the camera or the
+           network beyond the page load until the user agrees here. -->
+      <section id="screen-consent" class="screen" aria-labelledby="consent-heading">
+        <h1 id="consent-heading">A quiet minute with your camera</h1>
+        <p>
+          Breathe Together watches your breathing over your webcam and adjusts
+          a gentle pacing guide to match it. It only uses the camera after you
+          say so, and only for as long as you let it.
+        </p>
+        <ul>
+          <li><strong>What the camera is for:</strong> estimating your breathing rhythm so the pacing guide can keep pace with you.</li>
+          <li><strong>Where it is processed:</strong> on this computer, by a small local program. The camera picture itself stays on your device.</li>
+          <li><strong>What is saved:</strong> nothing by default. No video is stored or uploaded.</li>
+          <li><strong>How to stop:</strong> the Stop button is always visible while the camera is on. It releases the camera immediately.</li>
+          <li><strong>Each visit:</strong> consent is asked again every time you load the page.</li>
+        </ul>
+        <details class="why-camera">
+          <summary>Why camera?</summary>
+          <p>
+            The pacing guide works best when it can see your breathing rhythm.
+            The camera picture is analyzed on this device to estimate that
+            rhythm — no video is recorded, stored, or sent anywhere as video.
+            A short daily check-in with the analytics service (see the consent
+            notes in the project docs) can be switched off by the app's
+            configuration; nothing personal travels with it either way. If you
+            would rather not use the camera at all, the breathing guide can run
+            on its own — ask us in the app for the guide-only option.
+          </p>
+        </details>
+        <p id="camera-error" class="error-text" role="alert" hidden></p>
+        <button id="consent-button" class="button primary">I understand, start camera</button>
+        <p class="hint">After you click, your browser will ask for camera permission. You can decline — nothing starts without it.</p>
+      </section>
+
+      <!-- Setup: session length, options, live preview with framing guidance. -->
+      <section id="screen-setup" class="screen" aria-labelledby="setup-heading" hidden>
+        <h1 id="setup-heading">Get comfortable</h1>
+        <video id="preview-video" class="preview" muted playsinline aria-label="Camera preview"></video>
+        <p id="setup-guidance" class="guidance" aria-live="polite">Looking at the camera…</p>
+        <p id="setup-ready" class="ready" hidden>Ready — your face is clearly in view.</p>
+
+        <fieldset class="options">
+          <legend>Session length</legend>
+          <label><input type="radio" name="duration" value="3" checked /> 3 minutes</label>
+          <label><input type="radio" name="duration" value="5" /> 5 minutes</label>
+          <label><input type="radio" name="duration" value="10" /> 10 minutes</label>
+        </fieldset>
+
+        <fieldset class="options">
+          <legend>Guide style</legend>
+          <label><input type="checkbox" id="opt-audio-only" /> Audio only (tones, no visual orb)</label>
+          <label><input type="checkbox" id="opt-reduced-motion" /> Reduced motion</label>
+        </fieldset>
+
+        <fieldset class="options">
+          <legend>Mode</legend>
+          <label><input type="radio" name="mode" value="solo" checked /> Breathe on my own</label>
+          <label class="disabled"><input type="radio" name="mode" value="pair" disabled /> Breathe with someone <span class="soon">(coming soon)</span></label>
+        </fieldset>
+
+        <fieldset class="options" id="dev-panel" hidden>
+          <legend>Developer — mock scenario</legend>
+          <label>
+            Scenario
+            <select id="dev-scenario">
+              <option value="calm">calm</option>
+              <option value="agitated_then_settling" selected>agitated then settling</option>
+              <option value="ignores_pacer">ignores pacer</option>
+              <option value="dropout">dropout</option>
+              <option value="bad_light">bad light</option>
+            </select>
+          </label>
+        </fieldset>
+
+        <button id="begin-button" class="button primary">Begin</button>
+      </section>
+
+      <!-- Session: pacer orb, rate, state, notices. -->
+      <section id="screen-session" class="screen" aria-labelledby="session-state" hidden>
+        <h1 id="session-state">Settling in</h1>
+        <div class="orb-wrap">
+          <div id="orb" class="orb" role="img" aria-label="Breathing guide"></div>
+        </div>
+        <p id="session-phase" class="guidance" aria-hidden="true"></p>
+        <p class="session-stats">
+          <span id="session-rate">Your pace: —</span>
+          <span id="session-view">View: —</span>
+          <span id="session-time">—</span>
+        </p>
+        <p id="session-notice" class="guidance" aria-live="polite"></p>
+      </section>
+
+      <!-- Summary: observation-only lines from the server. -->
+      <section id="screen-summary" class="screen" aria-labelledby="summary-heading" hidden>
+        <h1 id="summary-heading">Session note</h1>
+        <div id="summary-lines"></div>
+        <div class="actions">
+          <button id="again-button" class="button primary">Do it again</button>
+          <button id="delete-button" class="button secondary">Delete my data</button>
+        </div>
+        <p id="delete-confirm" class="hint" role="status" hidden>Local history cleared.</p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      Not a medical device. Not for diagnosis or treatment.
+      <span id="source-note" class="source-note" hidden></span>
+    </footer>
+
+    <script type="module" src="/assets/client/main.js"></script>
   </body>
 </html>

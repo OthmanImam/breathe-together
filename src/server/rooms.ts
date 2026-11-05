@@ -278,6 +278,10 @@ export class RoomParticipant {
 
   setConsent(granted: boolean): void {
     this.consentGranted = granted;
+    if (!granted) {
+      // Revoking consent tears down everything sampling-related, preview too.
+      this.pipeline.stopPreview();
+    }
   }
 
   /**
@@ -311,6 +315,22 @@ export class RoomParticipant {
     }
     this.devScenario = scenario as MockScenario;
     return null;
+  }
+
+  /** Start preview (samples only, no coach). Consent required, same as sessions. */
+  startPreview(): { ok: true; kind: SourceKind; note?: string } | { ok: false; error: string } {
+    if (!this.consentGranted) {
+      return { ok: false, error: "Consent is required before previewing the camera." };
+    }
+    const built = this.pipeline.startPreview({
+      kind: this.wantedSource,
+      ...(this.devScenario ? { scenario: this.devScenario } : {}),
+    });
+    return { ok: true, kind: built.kind, ...(built.note ? { note: built.note } : {}) };
+  }
+
+  stopPreview(): void {
+    this.pipeline.stopPreview();
   }
 
   stopSession(): void {

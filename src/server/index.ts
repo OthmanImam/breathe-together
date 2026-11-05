@@ -308,6 +308,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
           roomId: joined.roomId,
           participantId: joined.participantId,
           signalSource,
+          devControls: manager.devControlsAllowed,
         });
         log({
           event: "connected",
@@ -363,6 +364,46 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
 
       case "stop_session": {
         participant?.stopSession();
+        break;
+      }
+
+      case "preview_start": {
+        if (!participant) return;
+        const started = participant.startPreview();
+        if (!started.ok) {
+          send(conn, {
+            type: "error",
+            code: "preview_refused",
+            message: started.error,
+          });
+          break;
+        }
+        if (started.note) {
+          send(conn, {
+            type: "notice",
+            t: now,
+            kind: "source_fallback",
+            text: started.note,
+            level: "info",
+          });
+        }
+        break;
+      }
+
+      case "preview_stop": {
+        participant?.stopPreview();
+        break;
+      }
+
+      case "set_scenario": {
+        if (!participant) return;
+        const err = participant.setDevScenario(
+          msg.scenario,
+          manager.devControlsAllowed,
+        );
+        if (err) {
+          send(conn, { type: "error", code: "dev_controls_off", message: err });
+        }
         break;
       }
 

@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "rootDir": "src",
+    "outDir": "public/assets",
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": ["src/client/**/*.ts", "src/server/protocol.ts", "src/config.ts", "src/signal/SignalSource.ts"]
+}

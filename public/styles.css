@@ -1,0 +1,149 @@
+/* Breathe Together — calm dark theme, honors prefers-color-scheme and
+   prefers-reduced-motion. No flashing, no alarm colors. */
+
+:root {
+  color-scheme: dark light;
+  --bg: #101418;
+  --surface: #1a2129;
+  --text: #e8edf2;
+  --muted: #aab6c2;
+  --accent: #7fb5a8;
+  --accent-ink: #0d1f1b;
+  --focus: #ffd479;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f5;
+    --surface: #eef0ec;
+    --text: #1c242c;
+    --muted: #4c5a66;
+    --accent: #3f7d6c;
+    --accent-ink: #ffffff;
+    --focus: #8a5a00;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+}
+
+.brand { font-weight: 600; letter-spacing: 0.02em; }
+
+.camera-indicator {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.camera-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+main { flex: 1; width: min(42rem, 100%); margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+
+.screen h1 { font-size: 1.6rem; font-weight: 600; }
+
+.button {
+  font: inherit;
+  padding: 0.6rem 1.1rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.button.primary { background: var(--accent); color: var(--accent-ink); }
+.button.secondary { background: transparent; color: var(--text); border-color: var(--muted); }
+
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.error-text { color: var(--focus); }
+.hint { color: var(--muted); font-size: 0.9rem; }
+
+.why-camera summary { cursor: pointer; font-weight: 600; }
+.why-camera p { color: var(--muted); }
+
+.preview {
+  width: min(20rem, 100%);
+  aspect-ratio: 4 / 3;
+  background: var(--surface);
+  border-radius: 0.75rem;
+  display: block;
+  margin: 1rem 0;
+}
+
+.guidance { color: var(--muted); min-height: 1.4em; }
+.ready { color: var(--accent); font-weight: 600; }
+
+.options {
+  border: 1px solid var(--muted);
+  border-radius: 0.5rem;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.options label { display: flex; gap: 0.5rem; align-items: center; }
+.options .disabled { color: var(--muted); }
+.soon { font-size: 0.85rem; }
+
+.orb-wrap { display: grid; place-items: center; padding: 2.5rem 0; }
+.orb {
+  width: 10rem;
+  height: 10rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, var(--accent), transparent 70%);
+  transition: transform 120ms linear;
+}
+
+.session-stats {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+#summary-lines p { line-height: 1.5; }
+.actions { display: flex; gap: 0.75rem; margin-top: 1.5rem; flex-wrap: wrap; }
+
+.site-footer {
+  padding: 0.75rem 1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+  border-top: 1px solid var(--muted);
+}
+
+.source-note { display: block; margin-top: 0.25rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .orb { transition: none; }
+}

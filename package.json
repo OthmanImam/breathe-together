@@ -9,7 +9,8 @@
   },
   "scripts": {
     "dev": "tsx watch src/sim/run.ts -- --scenario agitated_then_settling --minutes 1 --seed 7",
-    "serve": "tsx src/server/index.ts",
+    "serve": "npm run build:client && tsx src/server/index.ts",
+    "build:client": "tsc -p tsconfig.client.json",
     "simulate": "tsx src/sim/run.ts",
     "test": "node --import tsx --test \"test/*.test.ts\"",
     "lint": "eslint .",
@@ -21,6 +22,7 @@
     "@types/node": "^22.0.0",
     "@types/ws": "^8.18.2",
     "eslint": "^9.0.0",
+    "globals": "^17.14.0",
     "prettier": "^3.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.5.0",
