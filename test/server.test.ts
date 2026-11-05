@@ -122,8 +122,10 @@ test("mock session over ws: hello -> consent -> start -> full accelerated run", 
     client.send({ type: "consent_granted" });
     client.send({ type: "start_session", durationMin: 3, mode: "solo" });
 
-    // Until the driver ticks, nothing flows (manual driver).
-    await new Promise((r) => setTimeout(r, 50));
+    // Until the driver ticks, nothing flows (manual driver). Synchronize on
+    // ping/pong so the assertion can't race the server under load.
+    client.send({ type: "ping" });
+    await client.waitFor((m) => m.type === "pong");
     assert.ok(
       !client.messages.some((m) => m.type === "pacer_update"),
       "no pacer traffic before the server ticks",
@@ -169,11 +171,13 @@ test("frames are refused before consent, accepted after (counted; mock ignores b
     assert.equal((err as { code: string }).code, "consent_required");
 
     client.send({ type: "consent_granted" });
-    let framesReceivedAfter = 0;
     client.sendBinary(frame);
     // No error after consent; the mock source ignores frame content by design.
-    await new Promise((r) => setTimeout(r, 50));
-    framesReceivedAfter = client.messages.filter(
+    // Synchronize on a ping/pong pair (same connection, ordered) so the
+    // assertion below can't race the server's processing under load.
+    client.send({ type: "ping" });
+    await client.waitFor((m) => m.type === "pong");
+    const framesReceivedAfter = client.messages.filter(
       (m) => m.type === "error" && (m as { code: string }).code === "consent_required",
     ).length;
     assert.equal(framesReceivedAfter, 1, "only the pre-consent frame was refused");

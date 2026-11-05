@@ -56,6 +56,7 @@ class App {
   private rafId: number | undefined;
 
   private consentGranted = false;
+  private guideOnly = false;
   private sessionActive = false;
   private durationMin = 3 as 3 | 5 | 10;
   private sessionStartedAt = 0;
@@ -91,6 +92,17 @@ class App {
     el<HTMLButtonElement>("consent-button").addEventListener("click", () =>
       void this.handleConsent(),
     );
+    el<HTMLButtonElement>("guide-only-button").addEventListener("click", () =>
+      this.handleGuideOnly(),
+    );
+    el<HTMLButtonElement>("reconnect-button").addEventListener("click", () => {
+      el("reconnect-button").hidden = true;
+      this.ws.connect(
+        `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`,
+      );
+      this.ws.send({ type: "hello", clientVersion: "web-1" });
+      this.showScreen("consent");
+    });
     el<HTMLButtonElement>("stop-button").addEventListener("click", () =>
       this.handleStop(),
     );
@@ -99,7 +111,7 @@ class App {
     );
     el<HTMLButtonElement>("again-button").addEventListener("click", () => {
       this.showScreen("setup");
-      this.ws.send({ type: "preview_start" });
+      if (!this.guideOnly) this.ws.send({ type: "preview_start" });
     });
     el<HTMLButtonElement>("delete-button").addEventListener("click", () => {
       localStorage.removeItem("bt.history");
@@ -161,17 +173,22 @@ class App {
 
   private async handleConsent(): Promise<void> {
     el("camera-error").hidden = true;
+    el("guide-only-button").hidden = true;
     const video = el<HTMLVideoElement>("preview-video");
     try {
       await this.camera.start(video);
     } catch (err) {
       if (err instanceof CameraError) {
         this.showError(err.message);
+        // Guide-only is always offered when the camera can't be used.
+        el("guide-only-button").hidden = false;
       } else {
         this.showError("The camera could not be started. Nothing was opened.");
+        el("guide-only-button").hidden = false;
       }
       return;
     }
+    this.guideOnly = false;
     this.consentGranted = true;
     this.ws.send({ type: "consent_granted" });
     el("camera-indicator").hidden = false;
@@ -179,6 +196,22 @@ class App {
     this.showScreen("setup");
     this.ws.send({ type: "preview_start" });
     this.startFrameLoop();
+  }
+
+  /** Guide-only: consent to the session terms with the camera off entirely. */
+  private handleGuideOnly(): void {
+    el("camera-error").hidden = true;
+    el("guide-only-button").hidden = true;
+    this.guideOnly = true;
+    this.consentGranted = true;
+    this.ws.send({ type: "consent_granted" });
+    // Stop is still shown (ends the session); no camera indicator, no preview.
+    el("stop-button").hidden = false;
+    el("preview-video").hidden = true;
+    el("setup-guidance").textContent =
+      "Guide-only mode: a steady pacer with no sensing. Nothing is observed.";
+    el("setup-ready").hidden = true;
+    this.showScreen("setup");
   }
 
   private handleStop(silent = false): void {
@@ -189,6 +222,8 @@ class App {
     this.camera.stop();
     this.stopFrameLoop();
     this.consentGranted = false;
+    this.guideOnly = false;
+    el("preview-video").hidden = false;
     this.sessionActive = false;
     el("camera-indicator").hidden = true;
     el("stop-button").hidden = true;
@@ -198,15 +233,19 @@ class App {
 
   private handleDisconnect(): void {
     // The session cannot continue without the server; end safely and release
-    // the camera rather than leaving it running.
+    // the camera rather than leaving it running. Reconnect is offered as a
+    // fresh connection + fresh consent (consent is per page interaction).
     this.audio.stop();
     this.camera.stop();
     this.stopFrameLoop();
     this.consentGranted = false;
+    this.guideOnly = false;
     this.sessionActive = false;
+    el("preview-video").hidden = false;
     el("camera-indicator").hidden = true;
     el("stop-button").hidden = true;
     this.showError("The connection was lost, so the session ended. The camera is off.");
+    el("reconnect-button").hidden = false;
     this.showScreen("consent");
   }
 
@@ -221,6 +260,7 @@ class App {
       type: "start_session",
       durationMin: this.durationMin,
       mode: "solo",
+      ...(this.guideOnly ? { guideOnly: true } : {}),
     });
     this.showScreen("session");
     el("session-notice").textContent = "";

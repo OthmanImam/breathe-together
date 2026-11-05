@@ -134,6 +134,12 @@ export interface ServerSettings {
   frameBurst: number;
   /** Participant ID prefix for solo rooms (pair mode will reuse rooms with more participants). */
   soloParticipantId: string;
+  /** No sample for this long (ms) counts as a source failure and triggers a supervised restart. */
+  supervisorSilenceMs: number;
+  /** Maximum supervised restarts before degrading to guide-only. */
+  supervisorMaxRestarts: number;
+  /** Minimum gap between restart attempts (ms). */
+  supervisorBackoffMs: number;
 }
 
 export interface Settings {
@@ -227,6 +233,9 @@ export const DEFAULT_SETTINGS: Settings = {
     frameRatePerSec: 20,
     frameBurst: 30,
     soloParticipantId: "p1",
+    supervisorSilenceMs: 15_000,
+    supervisorMaxRestarts: 3,
+    supervisorBackoffMs: 2_000,
   },
 };
 

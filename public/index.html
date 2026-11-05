@@ -47,7 +47,11 @@
           </p>
         </details>
         <p id="camera-error" class="error-text" role="alert" hidden></p>
-        <button id="consent-button" class="button primary">I understand, start camera</button>
+        <div class="actions">
+          <button id="consent-button" class="button primary">I understand, start camera</button>
+          <button id="guide-only-button" class="button secondary" hidden>Continue with guide only (no camera)</button>
+          <button id="reconnect-button" class="button secondary" hidden>Reconnect</button>
+        </div>
         <p class="hint">After you click, your browser will ask for camera permission. You can decline — nothing starts without it.</p>
       </section>
 

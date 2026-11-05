@@ -86,12 +86,18 @@ export interface ParticipantEndedEvent {
   lines: string[];
 }
 
+export interface ParticipantDegradedEvent {
+  type: "source_degraded";
+  t: number;
+}
+
 export type ParticipantPipelineEvent =
   | ParticipantSampleEvent
   | ParticipantPacerEvent
   | ParticipantStateEvent
   | ParticipantNoticeEvent
-  | ParticipantEndedEvent;
+  | ParticipantEndedEvent
+  | ParticipantDegradedEvent;
 
 export interface StartedSource {
   kind: SourceKind;
@@ -164,6 +170,7 @@ export class ParticipantPipeline {
     const built = this.createSource(spec, this.previewSettings);
     this.previewSource = built.source;
     this.previewNormalizer = new Normalizer(this.previewSettings.signal);
+    this.wireSource(this.previewSource);
     this.previewSource.onSample((raw) => {
       const norm = this.previewNormalizer!.accept(raw);
       this.emit({ type: "sample", sample: norm });
@@ -216,6 +223,7 @@ export class ParticipantPipeline {
     );
 
     this.coach.onEvent((e) => this.onCoachEvent(e));
+    this.wireSource(this.source);
     this.source.onSample((raw) => {
       this.sampleSeenThisTick = true;
       const norm = this.normalizer!.accept(raw);
@@ -266,6 +274,9 @@ export class ParticipantPipeline {
       }
       this.lastSignalActivityT = nowMs;
     }
+    // Phase timers advance on ticks too, so guide-only sessions (no samples
+    // at all) still move through their phases and end on time.
+    this.coach?.tick(nowMs);
     const snap = this.pacer!.advance(nowMs);
     this.emit({ type: "pacer_update", t: nowMs, snap });
   }
@@ -280,6 +291,53 @@ export class ParticipantPipeline {
   }
 
   // ---- internals ---------------------------------------------------------
+
+  /** Attach degradation reporting when the source is supervised. */
+  private wireSource(source: SignalSource): void {
+    const maybeSupervised = source as { onDegraded?: () => void };
+    if ("onDegraded" in source) {
+      maybeSupervised.onDegraded = () => {
+        this.emit({ type: "source_degraded", t: this.clock.now() });
+      };
+    }
+  }
+
+  /** A source that emits nothing: guide-only sessions run on timers alone. */
+  private static nullSource(): SignalSource {
+    return {
+      start: () => undefined,
+      stop: () => undefined,
+      onSample: () => () => undefined,
+      tick: () => undefined,
+    };
+  }
+
+  /**
+   * Guide-only session: coach + pacer with no sensing at all. Used when the
+   * camera is unavailable or declined — the pacing guide still runs, and the
+   * summary says plainly that nothing was observed.
+   */
+  startGuideOnlySession(durationMin: SessionMinutes): StartedSource {
+    if (this.active) return this.startedSource ?? { kind: "mock" };
+    if (this.previewActive) this.stopPreview();
+    this.sessionSettings = patchSettings(this.baseSettings, {
+      session: { defaultMinutes: durationMin },
+    });
+    this.source = ParticipantPipeline.nullSource();
+    this.normalizer = new Normalizer(this.sessionSettings.signal);
+    this.coach = new CoachStateMachine({ clock: this.clock, settings: this.sessionSettings });
+    this.pacer = new Pacer(
+      this.sessionSettings.pacer,
+      this.sessionSettings.pacer.initialRate,
+    );
+    this.coach.onEvent((e) => this.onCoachEvent(e));
+    this.source.start();
+    this.coach.start();
+    this.active = true;
+    this.lastSignalActivityT = this.clock.now();
+    this.startedSource = { kind: "mock" };
+    return this.startedSource;
+  }
 
   private sampleSeenThisTick = false;
 

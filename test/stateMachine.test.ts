@@ -268,3 +268,33 @@ test("hold eases back up slowly and respects the ceiling", () => {
     patchSettings(FROZEN_DEFAULT_SETTINGS, {}).hold.ceiling > 0,
   );
 });
+
+test("guide-only (no samples at all): tick drives the whole session and the summary is honest", () => {
+  let now = 0;
+  const clock = { now: () => now };
+  const coach = new CoachStateMachine({ clock, settings: FROZEN_DEFAULT_SETTINGS });
+  const events: CoachEvent[] = [];
+  coach.onEvent((e) => events.push(e));
+  coach.start();
+  for (let t = 0; t <= 3 * 60_000; t += 1000) {
+    now = t;
+    coach.tick(now);
+  }
+  const states = events
+    .filter((e): e is Extract<CoachEvent, { type: "state_changed" }> => e.type === "state_changed")
+    .map((e) => e.to);
+  assert.deepEqual([...new Set(states)], ["calibrate", "match", "lead", "cooldown", "ended"]);
+  const ended = events.find(
+    (e): e is Extract<CoachEvent, { type: "session_ended" }> => e.type === "session_ended",
+  )!;
+  assert.ok(ended, "session ends naturally on timers alone");
+  assert.ok(
+    ended.lines.some((l) => l.includes("without sensing")),
+    "summary says nothing was observed",
+  );
+  assert.ok(
+    ended.lines.some((l) => l.includes("steady pace")),
+    "summary says the guide stayed steady",
+  );
+  assert.deepEqual(assertSummaryIsClean(ended.lines), []);
+});

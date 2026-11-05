@@ -39,12 +39,15 @@ export function formatRate(x: number | undefined): string {
 export function buildSummaryLines(d: SummaryData): string[] {
   const total = String(Math.round(d.minutesTotal * 10) / 10);
   const firstRate = d.firstRate ?? d.startRate;
+  // Guide-only sessions (no sensing): say so plainly instead of faking a range.
   const rhythmLine =
-    firstRate !== undefined &&
-    d.endRate !== undefined &&
-    Math.abs(firstRate - d.endRate) < 0.3
-      ? `With a clear view, your breathing rhythm read near about ${formatRate(d.endRate)} breaths per minute.`
-      : `With a clear view, your breathing rhythm read between about ${formatRate(firstRate)} and about ${formatRate(d.endRate)} breaths per minute.`;
+    d.firstRate === undefined && d.endRate === undefined
+      ? "No breathing rhythm was observed this session; the guide kept a steady pace throughout."
+      : firstRate !== undefined &&
+          d.endRate !== undefined &&
+          Math.abs(firstRate - d.endRate) < 0.3
+        ? `With a clear view, your breathing rhythm read near about ${formatRate(d.endRate)} breaths per minute.`
+        : `With a clear view, your breathing rhythm read between about ${formatRate(firstRate)} and about ${formatRate(d.endRate)} breaths per minute.`;
   const lines = [
     "Session wrap-up — pacing observations only.",
     `Pacing began at about ${formatRate(d.startRate)} breaths per minute and finished at about ${formatRate(d.finalPacerRate)} breaths per minute.`,
@@ -56,8 +59,16 @@ export function buildSummaryLines(d: SummaryData): string[] {
       `For about ${d.minutesDiverged.toFixed(1)} minutes your rhythm kept its own pace; the pacing stayed steady alongside you.`,
     );
   }
+  if (d.firstRate === undefined && d.endRate === undefined) {
+    lines.push(
+      "The guide ran without sensing throughout; nothing was observed.",
+    );
+  } else {
+    lines.push(
+      `We were without a clear view for about ${d.minutesUnavailable.toFixed(1)} minutes; pacing held steady during that stretch.`,
+    );
+  }
   lines.push(
-    `We were without a clear view for about ${d.minutesUnavailable.toFixed(1)} minutes; pacing held steady during that stretch.`,
     "That's everything this summary says — a plain rundown of the session, with nothing more implied.",
   );
   return lines;

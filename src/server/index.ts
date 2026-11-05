@@ -171,6 +171,14 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
           text: ev.text,
           level: ev.kind === "unavailable" || ev.kind === "hold" ? "guidance" : "info",
         });
+      } else if (ev.type === "source_degraded") {
+        send(conn, {
+          type: "notice",
+          t: ev.t,
+          kind: "source_degraded",
+          text: "The camera feed paused, so the guide is running on its own. Your pace is not being observed.",
+          level: "guidance",
+        });
       } else if (ev.type === "session_ended") {
         send(conn, {
           type: "session_end",
@@ -341,6 +349,17 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
 
       case "start_session": {
         if (!participant) return;
+        if (msg.guideOnly) {
+          const started = participant.startGuideOnlySession(msg.durationMin);
+          if (!started.ok) {
+            send(conn, {
+              type: "error",
+              code: "start_refused",
+              message: started.error,
+            });
+          }
+          break;
+        }
         const started = participant.startSession(msg.durationMin);
         if (!started.ok) {
           send(conn, {

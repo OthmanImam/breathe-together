@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { RoomManager, DEFAULT_SOURCE_FACTORY } from "../src/server/rooms.js";
 import { SimClock } from "../src/sim/harness.js";
-import { FROZEN_DEFAULT_SETTINGS } from "../src/config.js";
+import { FROZEN_DEFAULT_SETTINGS, patchSettings, type Settings } from "../src/config.js";
+import type { NormalizedSample, SignalSource } from "../src/signal/SignalSource.js";
 import type { ParticipantPipelineEvent } from "../src/server/sessionPipeline.js";
 
 function collect(participant: {
@@ -162,6 +163,104 @@ test("dev scenario control is permission-gated and validated", () => {
     (ended.summary!.minutesDiverged ?? 0) >= 1.5,
     "ignores_pacer scenario took effect",
   );
+});
+
+test("guide-only session runs on timers and ends honestly", () => {
+  const clock = new SimClock();
+  const mgr = new RoomManager({ clock });
+  const { roomId, participantId } = mgr.join();
+  const participant = mgr.getRoom(roomId)!.getParticipant(participantId)!;
+  const events = collect(participant);
+
+  // Consent still required, even without a camera.
+  assert.equal(participant.startGuideOnlySession(3).ok, false);
+  participant.setConsent(true);
+  assert.equal(participant.startGuideOnlySession(3).ok, true);
+
+  runUntilInactive(mgr, clock, () => participant.pipeline.isSessionActive);
+
+  const ended = events.find(
+    (e): e is Extract<ParticipantPipelineEvent, { type: "session_ended" }> =>
+      e.type === "session_ended",
+  )!;
+  assert.equal(ended.natural, true);
+  assert.ok(ended.lines.some((l) => l.includes("without sensing")));
+  // Pacer ran the whole time despite zero samples.
+  assert.ok(
+    events.some((e): e is Extract<ParticipantPipelineEvent, { type: "pacer_update" }> => e.type === "pacer_update"),
+  );
+  assert.equal(
+    events.filter((e) => e.type === "sample").length,
+    0,
+    "guide-only never fabricates a sample",
+  );
+});
+
+test("flaky sdk source: supervised restarts, then degrades with pacer still running", () => {
+  const clock = new SimClock();
+  // A source that dies after 2 samples, every incarnation.
+  const flakyFactory: (
+    spec: { kind: string; scenario?: never },
+    ctx: { clock: SimClock; settings: Settings; seed: number },
+  ) => { source: SignalSource; kind: "sdk"; note?: string } = (_spec, ctx) => {
+    const listeners: ((s: NormalizedSample) => void)[] = [];
+    let emitted = 0;
+    const source: SignalSource = {
+      start: () => undefined,
+      stop: () => undefined,
+      onSample: (cb) => {
+        listeners.push(cb);
+        return () => undefined;
+      },
+      tick: (t: number) => {
+        if (emitted < 2) {
+          emitted++;
+          for (const cb of listeners) {
+            cb({ t, breathingRate: 12, confidence: 1, status: "ok" });
+          }
+        }
+      },
+      setPacerRate: () => undefined,
+    };
+    void ctx;
+    return { source, kind: "sdk" };
+  };
+  const mgr = new RoomManager({
+    clock,
+    settings: patchSettings(FROZEN_DEFAULT_SETTINGS, {
+      server: {
+        supervisorSilenceMs: 2_000,
+        supervisorMaxRestarts: 1,
+        supervisorBackoffMs: 500,
+      },
+    }),
+    sourceFactory: flakyFactory as never,
+  });
+  const { roomId, participantId } = mgr.join();
+  const participant = mgr.getRoom(roomId)!.getParticipant(participantId)!;
+  participant.wantedSource = "sdk";
+  participant.setConsent(true);
+  const events = collect(participant);
+  participant.startSession(3);
+
+  for (let t = 0; t <= 60_000; t += 100) {
+    clock.advance(100);
+    mgr.tickAll(clock.now());
+  }
+
+  assert.ok(
+    events.some((e) => e.type === "source_degraded"),
+    "degradation surfaced to the pipeline",
+  );
+  // Pacer kept flowing after the source died (guide-only degradation).
+  const degradedIdx = events.findIndex((e) => e.type === "source_degraded");
+  assert.ok(
+    events
+      .slice(degradedIdx)
+      .some((e): e is Extract<ParticipantPipelineEvent, { type: "pacer_update" }> => e.type === "pacer_update"),
+    "pacer continues after degradation (session never freezes)",
+  );
+  participant.stopSession();
 });
 
 test("room closes when its last participant leaves", () => {

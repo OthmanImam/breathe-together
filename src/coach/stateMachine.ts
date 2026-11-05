@@ -151,6 +151,20 @@ export class CoachStateMachine {
     this.maybeEnterCooldown(now);
   }
 
+  /**
+   * Advance phase timers without a sample. Sample-driven paths call
+   * processPhaseLogic internally; calling tick() as well is harmless (every
+   * check is time-thresholded). Guide-only sessions (no source at all) rely
+   * on this to move through calibrate -> match -> ... -> cooldown -> ended.
+   */
+  tick(nowMs: number): void {
+    if (!this.started || this.ended) return;
+    if (nowMs < this.prevSampleT) return; // monotonic guard
+    this.processPhaseLogic(nowMs);
+    if (this.ended) return;
+    this.maybeEnterCooldown(nowMs);
+  }
+
   // ---- internals -------------------------------------------------------
 
   private handleConfidentSample(now: number, dt: number, rate: number): void {

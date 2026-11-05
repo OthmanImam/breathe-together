@@ -27,6 +27,7 @@ import {
 } from "../config.js";
 import type { Clock, SignalSource } from "../signal/SignalSource.js";
 import { MockSource, MOCK_SCENARIOS, type MockScenario } from "../signal/mockSource.js";
+import { SupervisedSource } from "../signal/supervisor.js";
 import type { ParticipantPipelineEvent } from "./sessionPipeline.js";
 import { ParticipantPipeline } from "./sessionPipeline.js";
 
@@ -227,11 +228,26 @@ export class Room {
     const pipeline = new ParticipantPipeline({
       clock: ctx.clock,
       settings,
-      createSource: (spec, sessionSettings) =>
-        ctx.sourceFactory(
+      createSource: (spec, sessionSettings) => {
+        const built = ctx.sourceFactory(
           { kind: spec.kind, ...(spec.scenario !== undefined ? { scenario: spec.scenario as MockScenario } : {}) },
           { clock: ctx.clock, settings: sessionSettings, seed },
-        ),
+        );
+        // Only real (SDK) sources are supervised: silence is a failure there.
+        // The mock's own dropout scenario is deliberate silence and must NOT
+        // be "repaired" by the supervisor.
+        if (spec.kind !== "sdk") return built;
+        const supervised = new SupervisedSource(
+          () => built.source,
+          {
+            silenceMs: ctx.settings.server.supervisorSilenceMs,
+            maxRestarts: ctx.settings.server.supervisorMaxRestarts,
+            backoffMs: ctx.settings.server.supervisorBackoffMs,
+          },
+          ctx.clock,
+        );
+        return { ...built, source: supervised };
+      },
     });
     const p = new RoomParticipant(id, pipeline, this);
     this.byId.set(id, p);
@@ -331,6 +347,20 @@ export class RoomParticipant {
 
   stopPreview(): void {
     this.pipeline.stopPreview();
+  }
+
+  /** Start a guide-only session (no sensing). Consent still required. */
+  startGuideOnlySession(
+    durationMin: SessionMinutes,
+  ): { ok: true } | { ok: false; error: string } {
+    if (!this.consentGranted) {
+      return { ok: false, error: "Consent is required before starting a session." };
+    }
+    if (this.pipeline.isSessionActive) {
+      return { ok: false, error: "A session is already running." };
+    }
+    this.pipeline.startGuideOnlySession(durationMin);
+    return { ok: true };
   }
 
   stopSession(): void {

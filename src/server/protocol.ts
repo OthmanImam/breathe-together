@@ -54,7 +54,13 @@ export type ClientMessage =
     }
   | { type: "consent_granted" }
   | { type: "consent_revoked" }
-  | { type: "start_session"; durationMin: SessionMinutes; mode: SessionMode }
+  | {
+      type: "start_session";
+      durationMin: SessionMinutes;
+      mode: SessionMode;
+      /** Guide-only: run the pacing guide with no sensing (no camera). */
+      guideOnly?: boolean;
+    }
   | { type: "stop_session" }
   /** Begin streaming normalized samples only (no coach): Setup-screen framing guidance. */
   | { type: "preview_start" }
@@ -252,7 +258,18 @@ export function parseClientMessage(parsed: unknown): ParsedClientMessage | Parse
       if (parsed.mode !== "solo") {
         return fail("invalid_field", 'mode must be "solo" (pair mode arrives in a later phase)');
       }
-      return { ok: true, message: { type: "start_session", durationMin: d as SessionMinutes, mode: "solo" } };
+      if (parsed.guideOnly !== undefined && typeof parsed.guideOnly !== "boolean") {
+        return fail("invalid_field", "guideOnly must be a boolean when present");
+      }
+      return {
+        ok: true,
+        message: {
+          type: "start_session",
+          durationMin: d as SessionMinutes,
+          mode: "solo",
+          ...(parsed.guideOnly === true ? { guideOnly: true } : {}),
+        },
+      };
     }
     case "stop_session":
       return { ok: true, message: { type: "stop_session" } };
