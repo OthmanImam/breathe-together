@@ -67,8 +67,8 @@ export interface LeadSettings {
   /**
    * Pacer rate floor (bpm). NOTE (internal): ~6-8 breaths/min is the range most
    * commonly used in slow-breathing relaxation exercises; 7 sits mid-range. This
-   * is a wellness-exercise convention, not a researched clinical constant —
-   * verify against citable sources before quoting it publicly.
+   * is a wellness-exercise convention, not a sourced constant — verify against
+   * citable sources before quoting it publicly.
    */
   targetFloor: number;
   /** |userRate - pacerRate| within this (bpm) counts as "following". */

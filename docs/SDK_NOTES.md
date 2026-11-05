@@ -327,8 +327,10 @@ Two distinct layers exist — this is important for our design:
 
 ## 10. Telemetry behavior
 
-- The SDK reports **one aggregate, per-session diagnostic summary** to Presage's
-  servers (same authenticated, TLS-pinned channel as other server requests).
+- The SDK reports **one aggregate, per-session telemetry summary** (what
+  Presage's docs describe as a "small, aggregate diagnostic summary of release
+  quality") to their servers, over the same authenticated, TLS-pinned channel
+  used for SDK server requests.
 - **Collected**: SDK build/version, platform/OS/device/CPU/binding, session
   shape (source kind, outcome, count of metrics requested), performance stats
   (frame throughput, input fps stats, startup latency, flow-limiter
@@ -357,7 +359,7 @@ Two distinct layers exist — this is important for our design:
 | 4 | "expressions" available | Yes — `EXPRESSIONS: 14`, `face.expression` series, via `faceMetrics` bundle | OK; not used by the coach in Phase 1. |
 | 5 | Continuous vs spot measurement unclear | Continuous streaming while running; opt-in accumulated packet at session end | Confirmed continuous; spot mode would be our own convention. |
 | 6 | Stability risk when feeding 30 fps frontend frames | Docs acknowledge IPC frame latency scales with resolution; engine state is process-global; `'frameSentThrough'` feedback exists | Child-process isolation planned for Phase 2 confirmed as advisable. |
-| 7 | (not assumed, worth noting) Diagnostics vs. wellness framing | SDK produces raw vitals (incl. APNEA flags, HRV "baevsky index"); nothing forces medical labeling | Our hard rules keep every feature observation-only; we will not surface APNEA or any diagnostic-sounding metric. |
+| 7 | (not assumed, worth noting) Measurement-tooling vs. wellness framing | SDK produces raw vitals (incl. APNEA flags, HRV "baevsky index"); nothing forces wellness labeling | Our hard rules keep every feature observation-only; we will not surface APNEA or any measurement-sounding flag. |
 
 ## 12. Open questions
 

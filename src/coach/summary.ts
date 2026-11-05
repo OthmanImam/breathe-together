@@ -4,7 +4,7 @@
  * HARD RULE: wording below is intentionally neutral — it describes only what
  * the pacing session observed (rates seen, time spent near the pacing rhythm,
  * time without a clear camera view). It must never imply health outcomes,
- * states of mind, or any form of clinical assessment. A regression test
+ * states of mind, or any form of professional assessment. A regression test
  * (`test/stateMachine.test.ts`) asserts none of the reserved restricted terms
  * ever appears in summary text.
  */
