@@ -386,6 +386,21 @@ Two distinct layers exist — this is important for our design:
    place to look before Phase 2 platform decisions.
 8. **Windows camera selection UX**: with `.front`/`.back` unavailable, how do
    multi-camera laptops pick the right camera? (By discovered ID + name.)
+   *(Phase 2 note: mooted by decision 14.1 — the **browser** owns the camera
+   and the SDK gets frames, so native camera selection never runs for us.)*
+9. **(Phase 2) Minimum acceptable frame rate / resolution for custom input**:
+   docs don't state the floor below which the engine reports
+   `kFrameRateTooLow` or degrades measurement. Our 320×240 @ 15 fps ceiling is
+   a starting point to be validated in the smoke run, guided by
+   `'frameSentThrough'` and validation codes.
+10. **(Phase 2) Starved-input behavior for `useCustomInput`**: what the engine
+    does when the browser tab is hidden and frames pause (open question 4,
+    sharpened: does it fire `kTimestampGap`, or `kFrameRateTooLow`? The worker
+    will simply stop pushing frames and report `lost` to the parent after a
+    configured gap, which is safe under both.)
+11. **(Phase 2) Credit spend model**: how quickly the free-trial allowance
+    burns per minute of streaming (open question 5 stands for budgeting the
+    demo; the daily/session cap in `config.ts` is a guess until observed).
 
 ## 13. Note on the assistant-skill install attempt
 
@@ -397,3 +412,119 @@ The prompt suggested installing the SmartSpectra agent skill via
 to, and all relevant pages were fetched directly and are summarized above. If a
 SmartSpectra **MCP server** is installed later, this document can be updated
 from live resources. Phase 1 does not depend on it.
+
+## 14. Phase 2 integration decisions (2026-11-05, re-verified against the live docs)
+
+Re-fetched `/docs/nodejs` and `/docs/nodejs/api-reference` before writing these.
+The Phase 1 notes above still match the published pages; no contradictions
+surfaced. New details found on this pass are called out inline and the affected
+open questions are updated in §15.
+
+### 14.1 Who owns the camera → the browser (consent UI), frames shipped to the server
+
+**Decision: browser capture → WebSocket → server → isolated child process →
+`useCustomInput()` / `sendFrame()`.**
+
+- The consent flow needs a browser camera prompt (`getUserMedia`), a live
+  preview, and a browser-managed capture indicator — all of that only exists
+  if the **browser** opens the camera. Server-side native capture
+  (`useCamera()` in a Node process) would start the camera with no user-facing
+  permission moment of our own, and a "preview" would require streaming
+  `videoOutput` frames back to the page (upside-down cost).
+- The docs explicitly bless this direction: _"Headless or server-side Node
+  process with host-provided frames: use `useCustomInput()` / `sendFrame()`"._
+- **Electron was considered and rejected**: the SDK's Electron path is excellent
+  (renderer capture + `bindSmartSpectraIpc`), but it adds a heavyweight
+  dependency, a packaging/signing surface, and a second app shell to maintain
+  — and the challenge app is a plain web app around a local server. The docs
+  support the custom-input path without Electron, so that is what we use. The
+  child-process isolation we do want comes from our own supervisor (§14.5),
+  which gives us the crash-safety benefit Electron's main-process puts the SDK
+  behind anyway.
+- The failure mode the community report hinted at (unstable when fed 30 fps
+  browser frames) is mitigated by throttling and downscaling before transport
+  (§14.2), and by isolating the SDK process so a stall can never take the page
+  or the coach down.
+
+### 14.2 Frame format, resolution and transport
+
+`sendFrame(buffer, width, height, stride, pixelFormat, timestampUs)` with
+`PixelFormat.kRGBA` is the lowest-friction match for browser capture: a canvas
+`ImageData` **is** an RGBA buffer — no re-encode. Per frame:
+
+| Aspect | Decision | Why |
+| --- | --- | --- |
+| Pixel format | `kRGBA` (4 bytes/px) | `canvas.getImageData()` output; zero conversion server-side. (kRGB would save 25% bandwidth but costs a server-side copy per frame — not worth it on localhost.) |
+| Resolution | 320×240 (configurable in `config.ts`) | Well below the SDK's native 1280×720 default; rPPG needs face skin texture, not detail. 320×240×4 = 300 KB raw per frame; frame data never leaves the machine (localhost WS). |
+| Frame rate | 15 fps max, **throttled in the browser** | The prompt's rule: push the minimum the SDK needs, not 30 fps. The exact *minimum* fps the engine accepts is undocumented (`kFrameRateTooLow` is the feedback channel — see new open question 9). 15 fps is our ceiling, tuned down later if the engine is happy with less. |
+| Transport | WebSocket binary frames (ArrayBuffer), one frame per message | Localhost only, no intermediate encoding. Server forwards each buffer to the SDK child process; the child calls `sendFrame()`. |
+| Timestamps | Monotonic µs derived from `performance.now()` on the browser side (documented `performance.now()` is monotonic), validated server-side for monotonicity | The troubleshooting table's `kNonMonotonicTimestamp` warning is about wall clocks; `performance.now()` is monotonic by spec. The server still drops/backfills out-of-order stamps defensively. |
+| Back-pressure | Page skips a frame entirely if the previous WS send hasn't drained (bufferedAmount watermark) | `'frameSentThrough'` (sent true/false) plus `kFrameRateTooLow` are the SDK-side signals for tuning the cap. |
+
+Never re-encoded to JPEG/WebM — the SDK takes raw pixels, and compression would
+just lose the subtle skin-tone variation rPPG reads.
+
+### 14.3 Metrics requested → what the UI may promise
+
+- We request **`breathingMetrics` only** (the default bundle). Breathing rate
+  comes from `decodeMetrics(buf).breathing?.rate?.at(-1)?.value`.
+- We do **not** request cardio/HRV/EDA. One metric family keeps the free-trial
+  credit spend minimal and keeps the UI honest about "one measurement, gently".
+- **Update cadence of `breathing.rate` is still undocumented** (open question 2
+  stands). The Phase 1 design already treats metrics as timestamped samples
+  with no assumed rate; the server decodes each `metrics` event, dedupes by
+  (metric, timestampUs), and emits a `NormalizedSample` per *new* value.
+- The UI never displays anything we don't stream: no pulse, no HRV numbers, no
+  "signal strength percentage" we can't derive honestly (§14.4). The `insight`
+  LLM path stays unused (Phase 1 decision — free-form output can't be
+  constrained to observation-only wording at runtime).
+
+### 14.4 Confidence / status derivation (documented fields only)
+
+- **`status`** comes from the `'validationStatus'` event via the Phase 1
+  mapping table (§7). That table is unchanged in the API reference:
+  `kOk→ok`, `kNoFaceFound/kMultipleFacesFound→no_face`,
+  `kFaceNotCentered/kFaceSizeOutOfRange/kChestNotVisible/kFaceTooX→off_center`,
+  `kTooDark/kTooBright→poor_light`, `kCameraTuning→starting`,
+  `kFrameRateTooLow/kExcessiveMotion→lost`, plus `processingStatus`
+  `kStarting→starting`.
+- **`confidence`**: breathing-rate per-sample confidence is still not spelled
+  in the docs (open question 3 stands). Honest derivation, no guessing:
+  - If a decoded breathing rate sample exposes a documented confidence field,
+    use it directly.
+  - Otherwise: `confidence = 1` for samples delivered while the latest
+    validation code is `kOk`, and the *status* carries the nuance. No invented
+    smoothness scores. The normalizer's plausibility/EMA layers still protect
+    the coach from jumpy values.
+- We will **not** guess `poor_light` from anything except `kTooDark` /
+  `kTooBright`.
+
+### 14.5 Process isolation and lifecycle
+
+- Native SDK state is **process-global** → strictly one SDK instance per
+  process, and we give it a **dedicated child process**
+  (`src/signal/sdkWorker.ts`, spawned by `src/signal/sdkSource.ts` with
+  `fork()`), supervised: heartbeat, restart with capped exponential backoff,
+  clean-stop that makes sure `stopAsync()` + `destroy()` run so the camera
+  input is released.
+- The child is the only process that imports `@smartspectra/node-sdk`. If the
+  package (or its platform runtime) is missing, the parent still boots with the
+  mock source and the UI says so honestly.
+- Auth: `SMARTSPECTRA_API_KEY` from env (our convention, open question 1
+  stands); injected into the child's SDK constructor. Missing key → clear
+  startup failure, never a silent fallback.
+- Credits are finite (`kCreditExhausted` is a first-class error code): the SDK
+  source never auto-starts on page load — a session or smoke run starts it, and
+  it stops (and usually destroys the child) the moment the session ends or
+  consent is revoked. A configurable daily/session cap adds a hard stop with a
+  kind message.
+
+### 14.6 Choice if the real SDK can't run here
+
+The dev machine is Windows x64 — a **supported** platform (`win32-x64`,
+adjacent-DLL search, no entitlements). So the expectation is that the real SDK
+runs; mock mode remains the default dev path anyway, and every Step is built
+and tested against the mock first. If the SDK turns out not to run, Steps 1–5
+stand alone with the mock and Step 6 ships as a documented, testable adapter
+(fake-SDK injected in tests), clearly reported — no faked output.
+
