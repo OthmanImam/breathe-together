@@ -36,6 +36,7 @@ interface ChannelState {
   };
   ema: number | undefined;
   lastGoodT: number; // ms timestamp of the last trusted update
+  hadGood: boolean; // has ever produced a trusted value once
   sawData: boolean;
 }
 
@@ -75,6 +76,7 @@ export class Normalizer {
       },
       ema: undefined,
       lastGoodT: Number.NEGATIVE_INFINITY,
+      hadGood: false,
       sawData: false,
     };
     this.pulse = {
@@ -86,6 +88,7 @@ export class Normalizer {
       },
       ema: undefined,
       lastGoodT: Number.NEGATIVE_INFINITY,
+      hadGood: false,
       sawData: false,
     };
   }
@@ -143,11 +146,13 @@ export class Normalizer {
         : this.heldValue(this.pulse, t);
 
     const anyData = this.rate.sawData || this.pulse.sawData;
-    const rateLost = anyData && this.isChannelLost(this.rate, t);
-    const pulseLost = anyData && this.isChannelLost(this.pulse, t);
+    const rateLost = this.rate.sawData && this.isChannelLost(this.rate, t);
+    const pulseLost = this.pulse.sawData && this.isChannelLost(this.pulse, t);
+    // The breathing-rate channel decides overall lostness (pulse is secondary).
+    const primaryLost = this.rate.sawData ? rateLost : pulseLost;
 
     let status: SignalStatus;
-    if (rateLost && pulseLost) {
+    if (anyData && primaryLost) {
       // Everything saw data at some point but nothing is currently presentable.
       status = "lost";
     } else if (!isStatusValid(raw.status) && rateOut === undefined && pulseOut === undefined) {
@@ -202,6 +207,7 @@ export class Normalizer {
     const next = nextEma(ch.ema, value, ch.algo.alpha);
     ch.ema = next;
     ch.lastGoodT = t;
+    ch.hadGood = true;
     return next;
   }
 
@@ -220,9 +226,9 @@ export class Normalizer {
   }
 
   private isChannelLost(ch: ChannelState, t: number): boolean {
-    if (ch.ema === undefined || ch.lastGoodT === Number.NEGATIVE_INFINITY) {
-      return true;
-    }
+    // A channel can only be "lost" if it once produced a trusted value.
+    if (!ch.hadGood) return false;
+    if (ch.ema === undefined) return true;
     return t - ch.lastGoodT > this.cfg.holdSeconds * 1000;
   }
 }
