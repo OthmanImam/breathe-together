@@ -135,11 +135,11 @@ export class MockSource implements SignalSource {
   }
 
   private updateTrueRate(): void {
-    const base = SCENARIO_BASE_RATE[this.scenario];
+    const calmBase = SCENARIO_BASE_RATE["calm"];
     const target =
       this.scenario === "ignores_pacer"
-        ? base
-        : (this.pacerTarget ?? base);
+        ? SCENARIO_BASE_RATE[this.scenario]
+        : (this.pacerTarget ?? calmBase); // pre-match: drift toward the gentle default
     this.trueRate += this.cfg.followStrength * (target - this.trueRate);
   }
 

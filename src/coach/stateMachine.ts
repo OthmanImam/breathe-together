@@ -88,6 +88,7 @@ export class CoachStateMachine {
   private unavailableActive = false;
   private unavailableMs = 0;
   private followedMs = 0;
+  private firstObservedRate: number | undefined;
   private lastObservedRate: number | undefined;
 
   constructor(deps: { clock: Clock; settings: Settings }) {
@@ -158,6 +159,7 @@ export class CoachStateMachine {
       this.notice("resume", now);
     }
     this.lastObservedRate = rate;
+    if (this.firstObservedRate === undefined) this.firstObservedRate = rate;
     if (this._state === "calibrate") this.calibSamples.push(rate);
 
     if (this._state !== "calibrate") {
@@ -358,6 +360,7 @@ export class CoachStateMachine {
     this.enterState("ended", now);
     const summary: SummaryData = {
       ...(this.matchRate !== undefined ? { startRate: this.matchRate } : {}),
+      ...(this.firstObservedRate !== undefined ? { firstRate: this.firstObservedRate } : {}),
       ...(this.lastObservedRate !== undefined ? { endRate: this.lastObservedRate } : {}),
       minutesFollowed: this.followedMs / 60_000,
       minutesUnavailable: this.unavailableMs / 60_000,

@@ -86,11 +86,15 @@ export function createHarness(opts: HarnessOptions): SimHarness {
     }
   });
 
-  // Real wiring: mock -> normalizer -> coach.
+  // Real wiring: mock -> normalizer -> coach. Also captures the rate the
+  // coach actually received this step (held values included, expired none).
   let gotSampleThisStep = false;
+  let presentedRate: number | undefined;
   source.onSample((rawSample) => {
     gotSampleThisStep = true;
-    coach.onSample(normalizer.accept(rawSample));
+    const norm = normalizer.accept(rawSample);
+    coach.onSample(norm);
+    presentedRate = norm.breathingRate;
   });
 
   source.start();
@@ -104,18 +108,22 @@ export function createHarness(opts: HarnessOptions): SimHarness {
       clock.advance(stepMs);
       const t = clock.now();
       gotSampleThisStep = false;
+      presentedRate = undefined;
       source.tick(t);
       if (!gotSampleThisStep) {
         // Silent period (e.g. dropout): let the normalizer emit hold/lost.
         const fromTick = normalizer.tick(t);
-        if (fromTick) coach.onSample(fromTick);
+        if (fromTick) {
+          coach.onSample(fromTick);
+          presentedRate = fromTick.breathingRate;
+        }
       }
       const snap = pacer.advance(t);
       rows.push({
         t,
         state: coach.state,
-        ...(normalizer.peekRate() !== undefined
-          ? { userRate: round2(normalizer.peekRate() as number) }
+        ...(presentedRate !== undefined
+          ? { userRate: round2(presentedRate) }
           : {}),
         pacerRate: snap.rate,
         phase: snap.phase,

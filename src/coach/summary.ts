@@ -12,7 +12,9 @@
 export interface SummaryData {
   /** Rate the pacing started with (bpm), if calibration produced one. */
   startRate?: number;
-  /** Last well-observed user breathing rate (bpm), if any. */
+  /** First confidently observed user breathing rate (bpm), if any. */
+  firstRate?: number;
+  /** Last confidently observed user breathing rate (bpm), if any. */
   endRate?: number;
   /** Minutes with confident observations near the pacing rhythm. */
   minutesFollowed: number;
@@ -34,7 +36,7 @@ export function buildSummaryLines(d: SummaryData): string[] {
   return [
     "Session wrap-up — pacing observations only.",
     `Pacing began at about ${formatRate(d.startRate)} breaths per minute and finished at about ${formatRate(d.finalPacerRate)} breaths per minute.`,
-    `With a clear view, your breathing rhythm read from about ${formatRate(d.startRate)} to about ${formatRate(d.endRate)} breaths per minute.`,
+    `With a clear view, your breathing rhythm read between about ${formatRate(d.firstRate ?? d.startRate)} and about ${formatRate(d.endRate)} breaths per minute.`,
     `You stayed close to the pacing rhythm for about ${d.minutesFollowed.toFixed(1)} of the ${total}-minute session.`,
     `We were without a clear view for about ${d.minutesUnavailable.toFixed(1)} minutes; pacing held steady during that stretch.`,
     "That's everything this summary says — a plain rundown of the session, with nothing more implied.",
