@@ -11,6 +11,7 @@
     "dev": "tsx watch src/sim/run.ts -- --scenario agitated_then_settling --minutes 1 --seed 7",
     "serve": "npm run build:client && tsx src/server/index.ts",
     "build:client": "tsc -p tsconfig.client.json",
+    "smoke:sdk": "tsx src/signal/smokeSdk.ts",
     "simulate": "tsx src/sim/run.ts",
     "test": "node --import tsx --test \"test/*.test.ts\" \"src/client/*.test.ts\"",
     "lint": "eslint .",
@@ -29,6 +30,7 @@
     "typescript-eslint": "^8.0.0"
   },
   "dependencies": {
+    "@smartspectra/node-sdk": "^3.4.0",
     "express": "^5.3.0",
     "ws": "^8.22.1"
   }

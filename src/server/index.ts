@@ -179,6 +179,14 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
           text: "The camera feed paused, so the guide is running on its own. Your pace is not being observed.",
           level: "guidance",
         });
+      } else if (ev.type === "source_capped") {
+        send(conn, {
+          type: "notice",
+          t: ev.t,
+          kind: "source_capped",
+          text: "The daily measurement time for this app is used up. The guide keeps running on its own.",
+          level: "guidance",
+        });
       } else if (ev.type === "session_ended") {
         send(conn, {
           type: "session_end",
@@ -450,19 +458,26 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     }
     conn.framesReceived++;
     const { timestampUs, pixels } = decodeFrameHeader(buf);
-    if (opts.onFrame) {
-      opts.onFrame({
-        roomId: conn.room,
-        participantId: conn.participantId,
-        timestampUs,
-        pixels,
-      });
-    }
+    (opts.onFrame ?? (signalSource === "sdk" ? frameRouter : undefined))?.({
+      roomId: conn.room,
+      participantId: conn.participantId,
+      timestampUs,
+      pixels,
+    });
     // In mock mode frames are counted but not consumed: the mock is the
     // source of truth by design. Step 6 attaches the SDK bridge here.
   }
 
   // -- driver + lifecycle ---------------------------------------------------
+  // Camera frames (SDK mode): route each binary frame to the owning
+  // participant's pipeline, which forwards it to the SDK source.
+  const frameRouter: FrameHandler = (info) => {
+    manager
+      .getRoom(info.roomId)
+      ?.getParticipant(info.participantId)
+      ?.pipeline.pushFrame(info.timestampUs, info.pixels);
+  };
+
   let driverInterval: NodeJS.Timeout | undefined;
   if ((opts.driver ?? "interval") === "interval") {
     const stepMs = Math.round(1000 / settings.server.pacerUpdateHz);
@@ -533,6 +548,16 @@ export function main(): void {
     // Structured logs: counters and ids only — never signal content or frames.
     process.stdout.write(`${JSON.stringify({ ...entry, at: new Date().toISOString() })}\n`);
   };
+  if (sourceKind === "sdk" && !process.env.SMARTSPECTRA_API_KEY) {
+    // Fail fast with a clear message instead of starting a server that could
+    // never measure anything (auth is constructor-injected; see SDK_NOTES §3).
+    log({
+      event: "startup_failed",
+      message:
+        "SIGNAL_SOURCE=sdk requires SMARTSPECTRA_API_KEY in the environment (copy .env.example to .env).",
+    });
+    process.exit(1);
+  }
   startServer({
     signalSource: sourceKind,
     allowDevControls: nodeEnv !== "production" && sourceKind === "mock",

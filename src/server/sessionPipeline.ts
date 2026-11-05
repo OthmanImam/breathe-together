@@ -91,13 +91,19 @@ export interface ParticipantDegradedEvent {
   t: number;
 }
 
+export interface ParticipantCappedEvent {
+  type: "source_capped";
+  t: number;
+}
+
 export type ParticipantPipelineEvent =
   | ParticipantSampleEvent
   | ParticipantPacerEvent
   | ParticipantStateEvent
   | ParticipantNoticeEvent
   | ParticipantEndedEvent
-  | ParticipantDegradedEvent;
+  | ParticipantDegradedEvent
+  | ParticipantCappedEvent;
 
 export interface StartedSource {
   kind: SourceKind;
@@ -281,6 +287,16 @@ export class ParticipantPipeline {
     this.emit({ type: "pacer_update", t: nowMs, snap });
   }
 
+  /** Forward a camera frame to the current source when it can consume one. */
+  pushFrame(timestampUs: number, pixels: Uint8Array): void {
+    const sink = this.source as { pushFrame?: (us: number, px: Uint8Array) => void } | undefined;
+    sink?.pushFrame?.(timestampUs, pixels);
+    const previewSink = this.previewSource as
+      | { pushFrame?: (us: number, px: Uint8Array) => void }
+      | undefined;
+    previewSink?.pushFrame?.(timestampUs, pixels);
+  }
+
   /** Final teardown: stops the source (releases camera-facing resources). */
   destroy(): void {
     if (this.previewActive) this.stopPreview();
@@ -292,12 +308,20 @@ export class ParticipantPipeline {
 
   // ---- internals ---------------------------------------------------------
 
-  /** Attach degradation reporting when the source is supervised. */
+  /** Attach degradation/cap reporting when the source is supervised. */
   private wireSource(source: SignalSource): void {
-    const maybeSupervised = source as { onDegraded?: () => void };
+    const maybeSupervised = source as {
+      onDegraded?: () => void;
+      onCapReached?: () => void;
+    };
     if ("onDegraded" in source) {
       maybeSupervised.onDegraded = () => {
         this.emit({ type: "source_degraded", t: this.clock.now() });
+      };
+    }
+    if ("onCapReached" in source) {
+      maybeSupervised.onCapReached = () => {
+        this.emit({ type: "source_capped", t: this.clock.now() });
       };
     }
   }

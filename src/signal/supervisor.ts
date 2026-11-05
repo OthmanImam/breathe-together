@@ -89,6 +89,14 @@ export class SupervisedSource implements SignalSource {
     this.inner?.setPacerRate?.(breathsPerMin);
   }
 
+  /** Forward a camera frame to the inner source when it consumes frames. */
+  pushFrame(timestampUs: number, pixels: Uint8Array): void {
+    const sink = this.inner as
+      | { pushFrame?: (us: number, px: Uint8Array) => void }
+      | undefined;
+    sink?.pushFrame?.(timestampUs, pixels);
+  }
+
   tick(tMs: number): void {
     if (!this.running || this.degraded) return;
     this.inner?.tick?.(tMs);

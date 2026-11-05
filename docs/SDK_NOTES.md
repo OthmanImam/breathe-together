@@ -528,3 +528,36 @@ and tested against the mock first. If the SDK turns out not to run, Steps 1–5
 stand alone with the mock and Step 6 ships as a documented, testable adapter
 (fake-SDK injected in tests), clearly reported — no faked output.
 
+### 14.7 Step 6 outcome (2026-11-06): real SDK loads natively; integration landed
+
+- The real package installed cleanly: `@smartspectra/node-sdk` **v3.4.0**,
+  native runtime for `win32-x64` loaded with no build step, and
+  `SmartSpectraSDK.availableCameras()` returned the dev machine's
+  **HP HD Camera**. The native-load risk is retired on this machine.
+- **Open question 3 is answered** (verified against the installed package's
+  own declarations): `Metrics.breathing.rate` items are
+  `MeasurementWithConfidence` with a `confidence` percentage **0.0–100.0**.
+  The adapter divides by 100. See `src/signal/sdkMapping.ts`.
+- `decodeMetrics` is imported from `@smartspectra/node-sdk/messages`
+  (the typed facade); the main-package decoder returns an unregistered
+  Buffer unless a class is registered — the `/messages` path avoids that.
+- Telemetry: `enableTelemetry: false` is set in the worker (verified option
+  in the installed `index.d.ts`), so `docs/CONSENT_AND_DATA.md §5` holds.
+- **No API key was available in this environment**, so a live authenticated
+  session could not be run here. What was verified end-to-end instead:
+  native load + camera discovery (`npm run smoke:sdk` keyless portion), the
+  full IPC path through the real worker process with the fake SDK injected
+  (`BT_FAKE_SDK=1`, test `sdkSource.test.ts`), mapping/failure-mode unit
+  tests, and the startup guard (server refuses `SIGNAL_SOURCE=sdk` without a
+  key with a clear message). The remaining manual check with a key:
+  `SMARTSPECTRA_API_KEY=… npm run smoke:sdk`, then a real session.
+- Daily/session budget: `config.sdk.dailyCapMinutes` (60) enforced via the
+  git-ignored `.bt-usage.json` counter; the SDK source refuses to start at
+  the cap and the UI shows the capped notice.
+- Architecture: browser frames → WS binary → server → `ParticipantPipeline.pushFrame`
+  → `SdkSource` → `fork()` child (`sdkWorker.ts`, advanced IPC serialization
+  for binary) → `sendFrame(rgb, 320, 240, stride, kRGBA, µs)`. The child is
+  supervised (rooms.ts wraps `sdk`-kind sources in `SupervisedSource`):
+  silence → backoff restart → guide-only degrade with an honest notice.
+
+

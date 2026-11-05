@@ -119,6 +119,21 @@ export interface MockSettings {
   badLightConfidence: number;
 }
 
+export interface SdkSettings {
+  /** Capture frame width the browser sends (px). Must match the client's downscale. */
+  frameWidth: number;
+  /** Capture frame height the browser sends (px). */
+  frameHeight: number;
+  /**
+   * Daily measurement budget (minutes) for the SDK source. When the counter
+   * (usage file) reaches this, the SDK source refuses to start and the guide
+   * runs on its own with a clear notice. Guards the free-trial credits.
+   */
+  dailyCapMinutes: number;
+  /** Counter file for the daily cap (JSON {date, seconds}). Git-ignored. */
+  usageFile: string;
+}
+
 export interface ServerSettings {
   /** HTTP/WS port for the local server. Production default; overridable by PORT env. */
   port: number;
@@ -152,6 +167,7 @@ export interface Settings {
   cooldown: CooldownSettings;
   session: SessionSettings;
   mock: MockSettings;
+  sdk: SdkSettings;
   server: ServerSettings;
 }
 
@@ -218,6 +234,12 @@ export const DEFAULT_SETTINGS: Settings = {
     badLightFor: 90,
     badLightConfidence: 0.15,
   },
+  sdk: {
+    frameWidth: 320,
+    frameHeight: 240,
+    dailyCapMinutes: 60,
+    usageFile: ".bt-usage.json",
+  },
   server: {
     port: 3000,
     // 10 Hz pacer push: the client interpolates between updates with rAF, so
@@ -269,6 +291,7 @@ export function patchSettings(base: Settings, patch: PartialSettings): Settings 
     cooldown: { ...base.cooldown, ...patch.cooldown },
     session: { ...base.session, ...patch.session },
     mock: { ...base.mock, ...patch.mock },
+    sdk: { ...base.sdk, ...patch.sdk },
     server: { ...base.server, ...patch.server },
   };
 }

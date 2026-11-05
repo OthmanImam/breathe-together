@@ -6,6 +6,7 @@ coverage/
 .env
 .env.*
 !.env.example
+.bt-usage*.json
 .DS_Store
 Thumbs.db
 npm-debug.log*

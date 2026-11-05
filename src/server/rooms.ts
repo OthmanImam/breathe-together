@@ -27,6 +27,7 @@ import {
 } from "../config.js";
 import type { Clock, SignalSource } from "../signal/SignalSource.js";
 import { MockSource, MOCK_SCENARIOS, type MockScenario } from "../signal/mockSource.js";
+import { SdkSource } from "../signal/sdkSource.js";
 import { SupervisedSource } from "../signal/supervisor.js";
 import type { ParticipantPipelineEvent } from "./sessionPipeline.js";
 import { ParticipantPipeline } from "./sessionPipeline.js";
@@ -59,10 +60,16 @@ export type SourceFactory = (
  */
 export const DEFAULT_SOURCE_FACTORY: SourceFactory = (spec, ctx) => {
   if (spec.kind === "sdk") {
+    // Real SDK source: the child process loads the native runtime. If the
+    // native package is missing, the child fails to start, the source goes
+    // silent, and supervision degrades honestly — never disguised as data.
     return {
-      source: new MockSource(spec.scenario ?? "calm", ctx.clock, ctx.settings.mock, ctx.seed),
-      kind: "mock",
-      note: "SDK source is not wired up in this build; running the mock guide.",
+      source: new SdkSource({
+        clock: ctx.clock,
+        settings: ctx.settings.sdk,
+        apiKey: process.env.SMARTSPECTRA_API_KEY ?? "",
+      }),
+      kind: "sdk",
     };
   }
   return {
@@ -229,24 +236,26 @@ export class Room {
       clock: ctx.clock,
       settings,
       createSource: (spec, sessionSettings) => {
-        const built = ctx.sourceFactory(
-          { kind: spec.kind, ...(spec.scenario !== undefined ? { scenario: spec.scenario as MockScenario } : {}) },
-          { clock: ctx.clock, settings: sessionSettings, seed },
-        );
         // Only real (SDK) sources are supervised: silence is a failure there.
         // The mock's own dropout scenario is deliberate silence and must NOT
         // be "repaired" by the supervisor.
-        if (spec.kind !== "sdk") return built;
-        const supervised = new SupervisedSource(
-          () => built.source,
-          {
-            silenceMs: ctx.settings.server.supervisorSilenceMs,
-            maxRestarts: ctx.settings.server.supervisorMaxRestarts,
-            backoffMs: ctx.settings.server.supervisorBackoffMs,
-          },
-          ctx.clock,
-        );
-        return { ...built, source: supervised };
+        if (spec.kind !== "sdk") {
+          return ctx.sourceFactory(
+            { kind: spec.kind, ...(spec.scenario !== undefined ? { scenario: spec.scenario as MockScenario } : {}) },
+            { clock: ctx.clock, settings: sessionSettings, seed },
+          );
+        }
+        const buildOnce = (): SignalSource =>
+          ctx.sourceFactory({ kind: "sdk" }, { clock: ctx.clock, settings: sessionSettings, seed })
+            .source;
+        // SupervisedSource spawns on start(), so the factory closure must
+        // build a FRESH source per attempt (a dead SDK child can't be revived).
+        const supervised = new SupervisedSource(buildOnce, {
+          silenceMs: ctx.settings.server.supervisorSilenceMs,
+          maxRestarts: ctx.settings.server.supervisorMaxRestarts,
+          backoffMs: ctx.settings.server.supervisorBackoffMs,
+        }, ctx.clock);
+        return { source: supervised, kind: "sdk" };
       },
     });
     const p = new RoomParticipant(id, pipeline, this);

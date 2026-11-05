@@ -283,13 +283,14 @@ test("second participant gets a unique id in the same room (pair-mode shape)", (
   assert.equal(mgr.roomCount, 0);
 });
 
-test("default source factory falls back honestly for sdk requests", () => {
+test("source factory: sdk kind builds the real SDK source; mock kind builds the mock", () => {
   const built = DEFAULT_SOURCE_FACTORY(
     { kind: "sdk" },
     { clock: new SimClock(), settings: FROZEN_DEFAULT_SETTINGS, seed: 7 },
   );
-  assert.equal(built.kind, "mock");
-  assert.match(built.note ?? "", /not wired up/);
+  assert.equal(built.kind, "sdk");
+  assert.equal(built.note, undefined);
+  assert.equal(typeof built.source.start, "function");
   const mock = DEFAULT_SOURCE_FACTORY(
     { kind: "mock", scenario: "calm" },
     { clock: new SimClock(), settings: FROZEN_DEFAULT_SETTINGS, seed: 7 },
