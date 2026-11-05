@@ -18,6 +18,11 @@ export interface SummaryData {
   endRate?: number;
   /** Minutes with confident observations near the pacing rhythm. */
   minutesFollowed: number;
+  /**
+   * Minutes with confident observations clearly off the pacing rhythm despite
+   * a good view (the person kept their own pace; pacing stayed steady).
+   */
+  minutesDiverged: number;
   /** Minutes without a trustworthy view (pacing held steady meanwhile). */
   minutesUnavailable: number;
   /** Session length in minutes. */
@@ -33,14 +38,29 @@ export function formatRate(x: number | undefined): string {
 
 export function buildSummaryLines(d: SummaryData): string[] {
   const total = String(Math.round(d.minutesTotal * 10) / 10);
-  return [
+  const firstRate = d.firstRate ?? d.startRate;
+  const rhythmLine =
+    firstRate !== undefined &&
+    d.endRate !== undefined &&
+    Math.abs(firstRate - d.endRate) < 0.3
+      ? `With a clear view, your breathing rhythm read near about ${formatRate(d.endRate)} breaths per minute.`
+      : `With a clear view, your breathing rhythm read between about ${formatRate(firstRate)} and about ${formatRate(d.endRate)} breaths per minute.`;
+  const lines = [
     "Session wrap-up — pacing observations only.",
     `Pacing began at about ${formatRate(d.startRate)} breaths per minute and finished at about ${formatRate(d.finalPacerRate)} breaths per minute.`,
-    `With a clear view, your breathing rhythm read between about ${formatRate(d.firstRate ?? d.startRate)} and about ${formatRate(d.endRate)} breaths per minute.`,
+    rhythmLine,
     `You stayed close to the pacing rhythm for about ${d.minutesFollowed.toFixed(1)} of the ${total}-minute session.`,
+  ];
+  if (d.minutesDiverged >= 0.5) {
+    lines.push(
+      `For about ${d.minutesDiverged.toFixed(1)} minutes your rhythm kept its own pace; the pacing stayed steady alongside you.`,
+    );
+  }
+  lines.push(
     `We were without a clear view for about ${d.minutesUnavailable.toFixed(1)} minutes; pacing held steady during that stretch.`,
     "That's everything this summary says — a plain rundown of the session, with nothing more implied.",
-  ];
+  );
+  return lines;
 }
 
 /**

@@ -221,6 +221,28 @@ test("hard rule: summary and notice wording stay observation-only for every scen
   }
 });
 
+test("ignores_pacer summary notes the rhythm kept its own pace", () => {
+  const h = createHarness({ scenario: "ignores_pacer", seed: 42, minutes: 3 });
+  h.runMinutes(3);
+  const ended = summaryOf(h);
+  assert.ok(ended.summary.minutesDiverged >= 1.5, "diverged minutes tracked");
+  assert.ok(
+    ended.lines.some((l) => l.includes("kept its own pace")),
+    `expected a kept-own-pace line: ${ended.lines.join(" | ")}`,
+  );
+});
+
+test("never-ratchet invariant: pacer never dips below the match rate while user ignores pacing", () => {
+  const h = createHarness({ scenario: "ignores_pacer", seed: 42, minutes: 3 });
+  h.runMinutes(3);
+  const matched = calibrationChange(h);
+  const duringLeadHold = h.rows
+    .filter((r) => r.state === "lead" || r.state === "hold")
+    .map((r) => r.pacerRate);
+  const min = Math.min(...duringLeadHold);
+  assert.ok(min >= matched.rate - 1e-9, `pacer dipped below the match rate: ${min}`);
+});
+
 test("unavailable accounting is sane for dropout", () => {
   const h = createHarness({ scenario: "dropout", seed: 42, minutes: 3 });
   h.runMinutes(3);
