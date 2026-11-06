@@ -28,7 +28,8 @@
         </p>
         <ul>
           <li><strong>What the camera is for:</strong> estimating your breathing rhythm so the pacing guide can keep pace with you.</li>
-          <li><strong>Where it is processed:</strong> on this computer, by a small local program. The camera picture itself stays on your device.</li>
+          <li><strong>Where it is processed:</strong> frames travel to the small local program on this same computer, where they are analyzed and then dropped — never saved as video. They never leave this device.</li>
+          <li><strong>What the vendor sees:</strong> the measurement engine checks your API key and usage with the vendor's servers when a session starts. No frames, no breathing numbers, and no personal details are sent.</li>
           <li><strong>What is saved:</strong> nothing by default. No video is stored or uploaded.</li>
           <li><strong>How to stop:</strong> the Stop button is always visible while the camera is on. It releases the camera immediately.</li>
           <li><strong>Each visit:</strong> consent is asked again every time you load the page.</li>
@@ -37,13 +38,17 @@
           <summary>Why camera?</summary>
           <p>
             The pacing guide works best when it can see your breathing rhythm.
-            The camera picture is analyzed on this device to estimate that
-            rhythm — no video is recorded, stored, or sent anywhere as video.
-            A short daily check-in with the analytics service (see the consent
-            notes in the project docs) can be switched off by the app's
-            configuration; nothing personal travels with it either way. If you
-            would rather not use the camera at all, the breathing guide can run
-            on its own — ask us in the app for the guide-only option.
+            The camera picture is analyzed on this computer to estimate that
+            rhythm — frames are used for the estimate and then discarded;
+            they are never recorded, saved, or uploaded. The measurement
+            software may contact its maker (Presage) to verify your API key
+            and plan usage when a session starts; that contact carries the
+            key and a device check only — never video or measurements. Its
+            optional usage-statistics reporting is switched off in this app.
+            Full details are in the project's consent notes
+            (`docs/CONSENT_AND_DATA.md`). If you would rather not use the
+            camera at all, the breathing guide can run on its own — decline
+            the camera permission and choose guide-only mode.
           </p>
         </details>
         <p id="camera-error" class="error-text" role="alert" hidden></p>

@@ -12,24 +12,34 @@
 - The camera is used only to estimate your breathing rhythm so the pacing
   guide can keep pace with you.
 - Processing happens on your own computer: a small local server plus the
-  measurement engine running in its own process on the same machine.
-- **Nothing is saved by default.** No video is stored, no history is kept, and
-  the session data in memory is discarded when the page is closed.
-- The camera picture itself never leaves your device. It is analyzed where it
-  was taken.
-- Consent is asked again on every page load. The Stop button — always visible
-  while the camera is on — ends the session and releases the camera
+  measurement engine running in its own process on the same machine. **No
+  camera frames ever leave this device.**
+- **Nothing is saved by default.** No video is stored, no history is kept,
+  and the session data in memory is discarded when the page is closed.
+- The vendor (Presage) is contacted **only** for account gating, never with
+  frames or measurements: checking your API key, pairing the device, asking
+  which metrics your key may use, and verifying usage. No video, no
+  breathing numbers, and no other personal data are sent (see §5).
+- Consent is asked again on every page load. The Stop button — always
+  visible while the camera is on — ends the session and releases the camera
   immediately.
+
+**Deployment note:** the architecture above assumes the server runs on this
+same machine (the app's design). If it is ever deployed to a shared server
+or a cloud workspace, camera frames would transit that infrastructure —
+deployments other than your own machine are not part of this build, and the
+consent copy would need to change accordingly.
 
 ## 2. Exactly what is collected
 
 | Item | Collected? | Details |
 | --- | --- | --- |
-| Camera frames | While consented only | The browser captures 320×240 RGBA frames at up to 15 fps and sends them over a WebSocket to the local server on this machine. Frames are never written to disk. |
-| Breathing rhythm estimate | While a session/preview runs | A number (breaths per minute), a confidence value, and a readiness status (`ok`, `no_face`, `poor_light`, `off_center`, `starting`, `lost`). This is the only per-person measurement the coach consumes. |
+| Camera frames | While consented only | The browser captures 320×240 RGBA frames at up to 15 fps and sends them over a WebSocket to the local server on this machine. Buffer handling: every frame is consumed in memory and then dropped — **nothing is written to disk, and frames are discarded as soon as they are processed** (in mock mode they are counted for rate-limiting and discarded without ever being measured; in SDK mode each frame is handed to the measurement engine process and then dropped). |
+| Breathing rhythm estimate | While a session/preview runs | A number (breaths per minute — the SDK's 30-second trailing average), a confidence value, and a readiness status (`ok`, `no_face`, `poor_light`, `off_center`, `starting`, `lost`). This is the only per-person measurement the coach consumes. |
 | Session summary numbers | In memory only | Start/end pacing rates, minutes near the pacing rhythm, minutes without a clear view. Kept in RAM to render the summary screen; discarded with the page. |
+| Software telemetry | Off by our choice | The measurement SDK's own aggregate session summary would otherwise default to ON; our wrapper disables it (`enableTelemetry: false`), so in this build it sends nothing. See §5. |
 | Account / identity | No | No accounts, no names, no emails, no device identifiers. |
-| IP address / location | No | Everything runs against `localhost`. The server binds locally and is not exposed. |
+| IP address / location | No (beyond the vendor gating calls) | The server binds locally and is not exposed. The one exception is the vendor gating traffic in §5, which the engine makes on its own. |
 | Audio | No | The microphone is never requested. |
 | Third-party analytics | No | No trackers, no crash reporters, no AI services. |
 
@@ -65,26 +75,38 @@ measurement engine in its own child process (SDK mode) — or the mock generator
   "Delete my data" button removes anything in `localStorage`. Closing the tab
   discards the in-memory session. There is nothing server-side to delete.
 
-## 5. The measurement SDK's own data behavior (per its privacy documentation)
+## 5. What the measurement SDK sends to the vendor (Presage)
 
-The SmartSpectra SDK's documented telemetry behavior, quoted and paraphrased
-from <https://smartspectra.presagetech.com/docs/telemetry-and-privacy>:
+Metric computation itself runs **entirely on this device**, inside the
+vendor's SDK. But the SDK contacts Presage's servers for account gating —
+this is real network traffic, observed in the SDK's own logs during a live
+run (device pairing, metrics authorization, usage verification). Precisely:
 
-- The SDK sends **one aggregate, per-session telemetry summary** to the
-  vendor's servers: build/version, platform/device info, session shape,
-  performance counters, quality counts, and a wall-clock timestamp.
-- **Never collected, per that documentation:** raw frames, any measured metric
-  values (breathing rates, pulse, and so on), file paths, prompts or free
-  text, user or stable device identifiers. It is not linked to identity and not
-  used for tracking.
-- Telemetry **defaults to on** in the raw SDK. **Our wrapper disables it**
-  (`enableTelemetry: false`) — see `docs/SDK_NOTES.md` §10/§14. Stated here so
-  the app's behavior matches this document; the step-6 integration test
-  verifies the flag is set.
+**Sent to Presage (account gating only):**
+- Your API key (constructor-injected from `SMARTSPECTRA_API_KEY`), to check
+  it is valid and its subscription/usage is current.
+- A device-pairing / key-provisioning request when the engine starts.
+- A metrics-authorization request naming the metric types you asked for
+  (breathing only in this app).
+- A usage-verification request counting the session against your plan.
 
-Separately, the SDK validates your API key against the vendor's server when a
-session starts (standard account/key check). Per the documentation, no frames
-or measurement values travel with that check.
+**Never sent (per the vendor's telemetry/privacy documentation):**
+- Raw camera frames or any video.
+- Any measured metric values — breathing rates, pulse, waveforms, or any
+  other measurement output.
+- File paths, prompts or free text, user or stable device identifiers.
+
+**SDK telemetry (aggregate session stats):** the SDK *can* send one
+aggregate release-quality summary per session (build/version, platform, session
+shape, performance and quality counters, timestamp) — but it **defaults to
+on only in the raw SDK**. Our wrapper sets `enableTelemetry: false`, so in
+this build that summary is **not sent at all**. The claim in this document
+is therefore stronger than the SDK's default: telemetry off, not merely
+disclosed.
+
+If any of the gating calls fail, the session does not start measuring —
+you will see a clear error rather than a degraded guess, and the guide
+falls back to running on its own (§7).
 
 ## 6. What is NOT involved
 

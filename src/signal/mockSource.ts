@@ -57,9 +57,11 @@ const SCENARIO_BASE_RATE: Record<MockScenario, number> = {
  *  - bad_light: status `poor_light` with low confidence for a stretch, then
  *    recovers.
  *
- * Realistic lag note: camera-derived breathing rate updates slowly with the
- * real SDK as well (docs/SDK_NOTES.md); the mock mimics that via the lag term
- * plus per-sample noise.
+ * Realistic lag note: the real SDK reports breathing rate as a trailing
+ * 30 s average (confidence 0 until the window fills — see docs/SDK_NOTES.md),
+ * so the mock reports the same trailing mean of the true rate rather than
+ * the instantaneous value. Coach thresholds (e.g. divergeSeconds > 30)
+ * are tuned against that lag.
  */
 export class MockSource implements SignalSource {
   private readonly scenario: MockScenario;
@@ -75,6 +77,13 @@ export class MockSource implements SignalSource {
   private nextIndex = 0;
   private trueRate: number;
   private pacerTarget: number | undefined;
+  /**
+   * Trailing window of true-rate samples (boxcar mean, 30 s at 1 Hz). The
+   * real SDK reports breathing rate as a 30 s average with confidence 0
+   * until the window fills — the mock reports the same way so coach
+   * thresholds tuned against the mock survive contact with the real lag.
+   */
+  private reportedWindow: number[] = [];
 
   constructor(scenario: MockScenario, clock: Clock, cfg: MockSettings, seed: number) {
     this.scenario = scenario;
@@ -91,6 +100,7 @@ export class MockSource implements SignalSource {
     this.trueRate = SCENARIO_BASE_RATE[this.scenario];
     this.pacerTarget = undefined;
     this.nextIndex = 0;
+    this.reportedWindow = [];
     this.started = true;
     this.running = true;
   }
@@ -151,7 +161,14 @@ export class MockSource implements SignalSource {
   }
 
   private observeAt(elapsedS: number, t: number): RawSample {
-    const noisy = this.trueRate + gaussian(this.uniform) * this.cfg.breathingNoise;
+    // Report a trailing 30 s mean of the true rate (the SDK's averaging
+    // window), with the mean over whatever has filled so far.
+    this.reportedWindow.push(this.trueRate);
+    const window = 30;
+    if (this.reportedWindow.length > window) this.reportedWindow.shift();
+    const mean =
+      this.reportedWindow.reduce((a, b) => a + b, 0) / this.reportedWindow.length;
+    const noisy = mean + gaussian(this.uniform) * this.cfg.breathingNoise;
     const rate = Math.round(noisy * 1000) / 1000;
 
     let confidence = 1;

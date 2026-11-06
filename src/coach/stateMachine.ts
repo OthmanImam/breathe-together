@@ -77,10 +77,16 @@ export class CoachStateMachine {
   private prevSampleT = Number.NEGATIVE_INFINITY;
   private leadWindowConf = 0;
   private leadWindowWithin = 0;
+  private leadWindowStartRate: number | undefined;
+  private leadWindowStartPacer = 0;
   private holdWindowConf = 0;
   private holdWindowWithin = 0;
+  private holdWindowStartRate: number | undefined;
+  private holdWindowStartPacer = 0;
   private holdUnproductiveWindows = 0;
   private divergeStreakMs = 0;
+  /** Largest |rate - pacer| seen during the current divergence streak. */
+  private streakMaxDist: number | undefined;
 
   // -- availability -----------------------------------------------------
   private sawAnySample = false;
@@ -185,32 +191,70 @@ export class CoachStateMachine {
       }
     }
 
-    // Divergence streak drives Lead/Match -> Hold ("they stopped following").
+    // Divergence streak drives Match/Lead -> Hold ("they stopped following").
+    // Lag-aware (the reported rate is a trailing 30 s mean): the streak only
+    // counts while divergence PERSISTS — if the reported rate is converging
+    // toward the pacer, the streak resets, so a user who just started
+    // following is never punished for the reporting lag.
     if (this._state === "match" || this._state === "lead") {
-      if (Math.abs(rate - this._pacerRate) > this.settings.lead.followTolerance) {
-        this.divergeStreakMs += dt;
-        if (this.divergeStreakMs >= this.settings.lead.divergeSeconds * 1000) {
+      const dist = Math.abs(rate - this._pacerRate);
+      if (dist > this.settings.lead.followTolerance) {
+        const maxDist = this.streakMaxDist ?? dist;
+        if (dist < maxDist - 0.5) {
+          // Converging from the streak's worst point: not real divergence.
           this.divergeStreakMs = 0;
-          this.enterHold(now);
-          return;
+        } else {
+          this.divergeStreakMs += dt;
+          if (this.divergeStreakMs >= this.settings.lead.divergeSeconds * 1000) {
+            this.divergeStreakMs = 0;
+            this.streakMaxDist = undefined;
+            this.enterHold(now);
+            return;
+          }
         }
+        this.streakMaxDist = Math.max(maxDist, dist);
       } else {
         this.divergeStreakMs = 0;
+        this.streakMaxDist = undefined;
       }
     }
 
-    // Rolling window counters for Lead/Hold evaluations.
+    // Rolling window counters for Lead/Hold evaluations. "Following" is
+    // trend-tolerant: within tolerance, OR measurably closer to the pacer
+    // than at the window start (a settling user whose lagged report is
+    // still converging counts as following).
     if (this._state === "lead") {
+      if (this.leadWindowStartRate === undefined) {
+        this.leadWindowStartRate = rate;
+        this.leadWindowStartPacer = this._pacerRate;
+      }
       this.leadWindowConf += 1;
-      if (Math.abs(rate - this._pacerRate) <= this.settings.lead.followTolerance) {
+      if (this.isFollowing(rate, this.leadWindowStartRate, this.leadWindowStartPacer)) {
         this.leadWindowWithin += 1;
       }
     } else if (this._state === "hold") {
+      if (this.holdWindowStartRate === undefined) {
+        this.holdWindowStartRate = rate;
+        this.holdWindowStartPacer = this._pacerRate;
+      }
       this.holdWindowConf += 1;
-      if (Math.abs(rate - this._pacerRate) <= this.settings.lead.followTolerance) {
+      if (this.isFollowing(rate, this.holdWindowStartRate, this.holdWindowStartPacer)) {
         this.holdWindowWithin += 1;
       }
     }
+  }
+
+  private isFollowing(
+    rate: number,
+    windowStartRate: number,
+    windowStartPacer: number,
+  ): boolean {
+    const tol = this.settings.lead.followTolerance;
+    if (Math.abs(rate - this._pacerRate) <= tol) return true;
+    return (
+      Math.abs(rate - this._pacerRate) <
+      Math.abs(windowStartRate - windowStartPacer) - 0.25
+    );
   }
 
   private handleUnconfidentSample(now: number, dt: number): void {
@@ -257,6 +301,7 @@ export class CoachStateMachine {
               : -1;
           this.leadWindowConf = 0;
           this.leadWindowWithin = 0;
+          this.leadWindowStartRate = undefined;
           this.stateEntryT = now; // window anchor for the next evaluation
           if (frac >= 0 && frac >= cfg.lead.followFraction) {
             // They are following: nudge the pace down, but never past the floor.
@@ -268,10 +313,10 @@ export class CoachStateMachine {
               this.setPacerRate(next, "lead_step_down", now);
               this.notice("lead_step_down", now);
             }
-          } else if (frac >= 0) {
-            const tHold = now;
-            this.enterHold(tHold);
           }
+          // An unproductive window no longer forces Hold directly — with a
+          // 30 s reporting lag, one slow window proves nothing. Hold comes
+          // only from the sustained-divergence streak above.
         }
         break;
       }
@@ -283,6 +328,7 @@ export class CoachStateMachine {
               : -1;
           this.holdWindowConf = 0;
           this.holdWindowWithin = 0;
+          this.holdWindowStartRate = undefined;
           this.stateEntryT = now;
           if (frac >= 0 && frac >= cfg.lead.followFraction) {
             // A full window of good following: return to Lead (hysteresis).
@@ -334,7 +380,9 @@ export class CoachStateMachine {
     this.holdUnproductiveWindows = 0;
     this.holdWindowConf = 0;
     this.holdWindowWithin = 0;
+    this.holdWindowStartRate = undefined;
     this.divergeStreakMs = 0;
+    this.streakMaxDist = undefined;
     this.enterState("hold", now);
     this.notice("hold", now);
   }
@@ -358,6 +406,7 @@ export class CoachStateMachine {
     this.stateEntryT = now;
     this.leadWindowConf = 0;
     this.leadWindowWithin = 0;
+    this.leadWindowStartRate = undefined;
     this.emit({ type: "state_changed", t: now, from, to });
   }
 

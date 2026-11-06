@@ -109,21 +109,21 @@ test("hold: hysteresis — a full window of following returns to Lead, divergenc
     events.some((e) => e.type === "state_changed" && e.to === "match"),
   );
 
-  // Diverge hard for 10s while in match: Hold.
-  for (let t = 46_000; t <= 55_000; t += 1000) {
+  // Diverge hard for 40s while in match (35s streak threshold): Hold.
+  for (let t = 46_000; t <= 85_000; t += 1000) {
     coach.onSample({ t, breathingRate: 30, confidence: 1, status: "ok" });
   }
   const holdEntry = events.find((e) => e.type === "state_changed" && e.to === "hold");
   assert.ok(holdEntry !== undefined, "Hold expected after sustained divergence");
-  assert.ok(holdEntry.t <= 56_000);
+  assert.ok(holdEntry.t <= 86_000);
   assert.ok(
     events.some((e) => e.type === "notice" && e.kind === "hold"),
   );
 
   // Stay close for a full Hold window (45s of confident, near-pacer samples):
   // the coach must come back to Lead (hysteresis via window evaluation).
-  let t = 56_000;
-  while (t <= 100_000) {
+  let t = (holdEntry.t as number) + 1000;
+  while (t <= (holdEntry.t as number) + 46_000) {
     coach.onSample({ t, breathingRate: 12.2, confidence: 1, status: "ok" });
     t += 1000;
   }
@@ -132,6 +132,68 @@ test("hold: hysteresis — a full window of following returns to Lead, divergenc
   );
   assert.ok(backToLead, "expected Lead after a following window");
   assert.ok(events.at(-1) !== undefined);
+});
+
+test("lag regression: a user who starts following is not held by the 30 s reporting lag", () => {
+  // Reported rate = trailing 30 s mean of the true rate (what the SDK does).
+  // True rate: 12 (calibrates to pacer 12), diverges at 46 s to 20, then from
+  // 76 s follows the pacer again (12). The report takes until ~105 s to
+  // converge — divergence persisted only 46-76 s, under the 35 s streak, and
+  // the streak resets as the report converges. The coach must NOT enter Hold.
+  const clock: Clock = { now: () => 0 };
+  const coach = new CoachStateMachine({
+    clock,
+    settings: FROZEN_DEFAULT_SETTINGS,
+  });
+  const events: CoachEvent[] = [];
+  coach.onEvent((e) => events.push(e));
+  coach.start(0);
+
+  const trueAt = (t: number): number => (t >= 46_000 && t < 76_000 ? 20 : 12);
+  const recent: number[] = [];
+  const reportedAt = (t: number): number => {
+    recent.push(trueAt(t));
+    if (recent.length > 30) recent.shift();
+    return recent.reduce((a, b) => a + b, 0) / recent.length;
+  };
+  for (let t = 1000; t <= 160_000; t += 1000) {
+    coach.onSample({ t, breathingRate: reportedAt(t), confidence: 1, status: "ok" });
+  }
+  const holdEntries = events.filter(
+    (e) => e.type === "state_changed" && e.to === "hold",
+  );
+  assert.equal(
+    holdEntries.length,
+    0,
+    `no Hold during the lag window (got ${holdEntries.map((e) => e.t).join(",")})`,
+  );
+});
+
+test("lag regression: sustained non-converging divergence still reaches Hold", () => {
+  // Calibrates at 12, then the true rate steps to 20 and stays there. The
+  // report rises and plateaus 8 bpm off the pacer: sustained divergence.
+  const clock: Clock = { now: () => 0 };
+  const coach = new CoachStateMachine({
+    clock,
+    settings: FROZEN_DEFAULT_SETTINGS,
+  });
+  const events: CoachEvent[] = [];
+  coach.onEvent((e) => events.push(e));
+  coach.start(0);
+  const trueAt = (t: number): number => (t < 46_000 ? 12 : 20);
+  const recent: number[] = [];
+  const reportedAt = (t: number): number => {
+    recent.push(trueAt(t));
+    if (recent.length > 30) recent.shift();
+    return recent.reduce((a, b) => a + b, 0) / recent.length;
+  };
+  for (let t = 1000; t <= 140_000; t += 1000) {
+    coach.onSample({ t, breathingRate: reportedAt(t), confidence: 1, status: "ok" });
+  }
+  assert.ok(
+    events.some((e) => e.type === "state_changed" && e.to === "hold"),
+    "sustained divergence still reaches Hold",
+  );
 });
 
 test("signal_lost: pacing continues through a dropout and recovers on return", () => {

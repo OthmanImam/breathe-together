@@ -33,7 +33,11 @@ test("sdkSource drives the real worker process end to end (fake SDK via env)", a
   // Push frames (the fake counts them; samples come from its metrics timer).
   const pixels = new Uint8Array(320 * 240 * 4);
   for (let i = 0; i < 5; i++) source.pushFrame(i * 100_000, pixels);
-  await new Promise((r) => setTimeout(r, 1200));
+  // Poll until samples arrive over IPC (child boot time varies under load).
+  const deadline = Date.now() + 10_000;
+  while (samples.length < 2 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
   source.stop();
   assert.ok(samples.length >= 2, `samples arrived over IPC (${samples.length})`);
   assert.equal(samples[0]!.rate, 12);

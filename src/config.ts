@@ -77,6 +77,13 @@ export interface LeadSettings {
   followFraction: number;
   /** Continuous divergence longer than this moves Lead -> Hold (seconds). */
   divergeSeconds: number;
+  /**
+   * Length of the SDK's breathing-rate averaging window (seconds). The
+   * reported rate is a trailing 30 s mean, so the report can lag a step
+   * change in the user's actual breathing by up to this long. Coach streak
+   * thresholds must exceed it, or Hold fires on the lag alone.
+   */
+  averagingWindowSeconds: number;
 }
 
 export interface HoldSettings {
@@ -210,7 +217,12 @@ export const DEFAULT_SETTINGS: Settings = {
     targetFloor: 7,
     followTolerance: 1.0,
     followFraction: 0.7,
-    divergeSeconds: 10,
+    // Must exceed the 30 s reporting window: with a trailing-mean rate, a
+    // user who STARTS following still shows as diverged for up to 30 s. A
+    // 10 s streak (the old value) entered Hold on the lag alone — the coach
+    // would feel unresponsive right when the user began to follow.
+    divergeSeconds: 35,
+    averagingWindowSeconds: 30,
   },
   hold: {
     easeWindowSeconds: 45,

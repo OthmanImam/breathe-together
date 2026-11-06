@@ -111,6 +111,35 @@ test("kProcessingFailed wedges the engine: worker recovers via reset() and resum
   worker.handleMessage({ type: "shutdown" });
 });
 
+test("repeated wedges: worker recovers every time and frames keep flowing", async () => {
+  const { worker, out } = makeWorker();
+  worker.handleMessage({ type: "init", apiKey: "k", frameWidth: 320, frameHeight: 240 });
+  const inst = FakeSmartSpectraSDK.instances[0]!;
+  for (let round = 0; round < 5; round++) {
+    worker.handleMessage({
+      type: "frame",
+      timestampUs: 1000 + round * 2000,
+      pixels: new Uint8Array(320 * 240 * 4),
+    });
+    inst.wedge();
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.equal(inst.resetCount, 5, "one rebuild per wedge, no more, no less");
+  assert.equal(
+    out.filter((m) => m.type === "error" && m.code === "sdk_error_8").length,
+    5,
+  );
+  // The worker is still alive and accepting frames.
+  const before = inst.framesReceived;
+  worker.handleMessage({
+    type: "frame",
+    timestampUs: 20_000,
+    pixels: new Uint8Array(320 * 240 * 4),
+  });
+  assert.ok(inst.framesReceived > before, "frames flow after repeated recovery");
+  worker.handleMessage({ type: "shutdown" });
+});
+
 test("shutdown stops and destroys the SDK", async () => {
   const { worker, out } = makeWorker();
   worker.handleMessage({ type: "init", apiKey: "k", frameWidth: 320, frameHeight: 240 });
