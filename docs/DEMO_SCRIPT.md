@@ -34,10 +34,12 @@ fine and predictable; SDK mode if a key is handy) and open the app.
 - At *Matching your pace* the orb snaps to your calibrated rate.
 - At *Slowing gently* the coach eases the orb a breath slower every window
   or so, with the notice *"Letting the pace ease a touch slower, with you."*
-- Demo tip: breathe a little faster on purpose — after ~10 s of divergence
-  the coach stops pushing and switches to *Staying with you* with
+- Demo tip: breathe a little faster on purpose — after ~35–60 s of
+  sustained divergence (35 s streak + the 30 s reporting lag) the coach
+  stops pushing and switches to *Staying with you* with
   *"Taking it slowly with you."* It never ratchets you down for ignoring it;
-  say that sentence out loud.
+  say that sentence out loud. **Give the moment room on camera: this is a
+  slow coach by design — don't promise quick reactions.**
 
 ## 4. Signal-loss recovery (~30 s)
 

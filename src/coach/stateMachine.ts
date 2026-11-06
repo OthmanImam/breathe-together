@@ -200,7 +200,8 @@ export class CoachStateMachine {
       const dist = Math.abs(rate - this._pacerRate);
       if (dist > this.settings.lead.followTolerance) {
         const maxDist = this.streakMaxDist ?? dist;
-        if (dist < maxDist - 0.5) {
+        const convergeBpm = this.settings.lead.convergeResetBpm;
+        if (dist < maxDist - convergeBpm) {
           // Converging from the streak's worst point: not real divergence.
           this.divergeStreakMs = 0;
         } else {
@@ -251,9 +252,10 @@ export class CoachStateMachine {
   ): boolean {
     const tol = this.settings.lead.followTolerance;
     if (Math.abs(rate - this._pacerRate) <= tol) return true;
+    const margin = this.settings.lead.trendFollowMarginBpm;
     return (
       Math.abs(rate - this._pacerRate) <
-      Math.abs(windowStartRate - windowStartPacer) - 0.25
+      Math.abs(windowStartRate - windowStartPacer) - margin
     );
   }
 

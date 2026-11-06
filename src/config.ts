@@ -78,6 +78,19 @@ export interface LeadSettings {
   /** Continuous divergence longer than this moves Lead -> Hold (seconds). */
   divergeSeconds: number;
   /**
+   * Convergence threshold for the lag-aware divergence streak (bpm): when
+   * the reported distance falls this far below the streak's worst point,
+   * the streak resets. Raise this if noisy real signals make the coach
+   * flap between states.
+   */
+  convergeResetBpm: number;
+  /**
+   * Trend-tolerance margin for the "following" test (bpm): a sample counts
+   * as following if it is this much closer to the pacer than the window
+   * start was. Raise alongside convergeResetBpm if wobble triggers it.
+   */
+  trendFollowMarginBpm: number;
+  /**
    * Length of the SDK's breathing-rate averaging window (seconds). The
    * reported rate is a trailing 30 s mean, so the report can lag a step
    * change in the user's actual breathing by up to this long. Coach streak
@@ -223,6 +236,8 @@ export const DEFAULT_SETTINGS: Settings = {
     // would feel unresponsive right when the user began to follow.
     divergeSeconds: 35,
     averagingWindowSeconds: 30,
+    convergeResetBpm: 0.5,
+    trendFollowMarginBpm: 0.25,
   },
   hold: {
     easeWindowSeconds: 45,
