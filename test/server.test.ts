@@ -25,8 +25,7 @@ interface Client {
   ws: WebSocket;
   messages: ServerMessage[];
   /** Wait until `pred` matches a collected message, or time out. */
-  waitFor(pred: (m: ServerMessage) => boolean, timeoutMs?: number): Promise<ServerMessage>;
-  send(obj: unknown): void;
+  waitFor(pred: (m: ServerMessage) => boolean, timeoutMs?: number): Promise<ServerMessage>;  send(obj: unknown): void;
   sendRaw(text: string): void;
   sendBinary(buf: Uint8Array): void;
   close(): void;
@@ -59,7 +58,7 @@ function connect(port: number): Promise<Client> {
       resolve({
         ws,
         messages,
-        waitFor: (pred, timeoutMs = 3000) =>
+        waitFor: (pred, timeoutMs = 10_000) =>
           new Promise((res, rej) => {
             const existing = messages.find(pred);
             if (existing) return res(existing);

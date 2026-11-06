@@ -16,8 +16,8 @@
  * - `stopSession()` ends a session early (user stop / consent revoked). The
  *   coach does not summarize sessions it did not run through cooldown, so
  *   the emitted `session_ended` carries `natural: false` and no summary.
- * - a natural session end stops the source too (Step 6's SDK source treats
- *   stop as "release the camera").
+ * - a natural session end stops the source too (Step 6's SDK source uses
+ *   stop to release the camera).
  *
  * Sequence guarantees (tested):
  * - samples reach the coach only via the normalizer;

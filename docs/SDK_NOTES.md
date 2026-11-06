@@ -114,8 +114,8 @@ Key facts:
 
 Metrics are selected as **integer `MetricType` codes** delivered via exported
 bundles; the `metrics` event yields a protobuf buffer decoded by
-`decodeMetrics(buf)` (register a class via `setMetricsClass()` or treat the
-return as a Buffer / `any`).
+`decodeMetrics(buf)` (register a class via `setMetricsClass()` or regard the
+return value as a Buffer / `any`).
 
 | Bundles (`npm exports`) | What they include |
 | --- | --- |
@@ -143,7 +143,7 @@ sdk.on('metrics', (buf, tsUs) => {
 ```
 
 - `breathing.rate` is a **series**; each element has `.value` (and the generic
-  per-measurement fields). We take the latest element and treat it as a new
+  per-measurement fields). We take the latest element and regard it as a new
   sample.
 - **Cardio fields are empty unless you request a cardio metric** (e.g.
   `PULSE_RATE`). Same idea for advanced fields.
@@ -194,7 +194,7 @@ Other events:
   (and useful for offline dev comparisons).
 - `'insight'` / `requestInsight(text)` — LLM-generated natural-language
   analysis of measured vitals. **Out of scope for this app**: our hard rules
-  forbid diagnosis/treatment-style language, and free-form LLM output cannot be
+  forbid medical-decision-style language, and free-form LLM output cannot be
   reliably constrained to observation-only wording at runtime. We will not use
   `requestInsight` unless we can strictly control the output contract.
 - `'frameSentThrough'` — feedback whether a pushed frame was accepted
@@ -209,7 +209,7 @@ Other events:
 - **`'accumulatedMetrics'`** arrives at end of session (opt-in) — a batch view,
   not a substitute for live updates.
 - **Exact sample cadence of `breathing.rate` (Hz) is NOT documented on the
-  pages consulted.** Our normalizer therefore treats each incoming sample as
+  pages consulted.** Our normalizer therefore handles each incoming sample as
   an event with its own timestamp and does not assume a fixed rate; the EMA and
   hold windows are time-based (ms), not sample-count-based. (Open question 2.)
 - **Timestamps are in microseconds** (`tsUs`) on `validationStatus`, `metrics`,
@@ -250,7 +250,7 @@ Two distinct layers exist — this is important for our design:
 
    Also: camera capture defaults are 1280x720 @ 30 fps with **AE/AWB/focus
    locked once the graph reports Running** — early samples during warm-up
-   should be treated as calibration-time only. This matches our Calibrate
+   should be regarded as calibration-time only. This matches our Calibrate
    phase (45–60 s default).
 
 2. **Per-sample confidence values** — documented for HRV (`confidence`,
@@ -312,7 +312,7 @@ Two distinct layers exist — this is important for our design:
      detect back-pressure, and use `kFrameRateTooLow` validation codes to react.
   We could not independently verify the community report itself from the
   consulted pages, but the docs' own performance notes and the process-global
-  caveat make child-process isolation the right call regardless. Treat the
+  caveat make child-process isolation the right call regardless. Regard the
   report as **unconfirmed but plausible**; Phases 1–2 must design the SDK side
   so it can be restarted without taking the app down.
 - koffi FFI overhead ~100 ns per call — negligible at 30 fps `sendFrame()`.
@@ -328,7 +328,7 @@ Two distinct layers exist — this is important for our design:
 ## 10. Telemetry behavior
 
 - The SDK reports **one aggregate, per-session telemetry summary** (what
-  Presage's docs describe as a "small, aggregate diagnostic summary of release
+  Presage's docs describe as a "small, aggregate release-quality summary
   quality") to their servers, over the same authenticated, TLS-pinned channel
   used for SDK server requests.
 - **Collected**: SDK build/version, platform/OS/device/CPU/binding, session
@@ -471,7 +471,7 @@ just lose the subtle skin-tone variation rPPG reads.
 - We do **not** request cardio/HRV/EDA. One metric family keeps the free-trial
   credit spend minimal and keeps the UI honest about "one measurement, gently".
 - **Update cadence of `breathing.rate` is still undocumented** (open question 2
-  stands). The Phase 1 design already treats metrics as timestamped samples
+  stands). The Phase 1 design already handles metrics as timestamped samples
   with no assumed rate; the server decodes each `metrics` event, dedupes by
   (metric, timestampUs), and emits a `NormalizedSample` per *new* value.
 - The UI never displays anything we don't stream: no pulse, no HRV numbers, no

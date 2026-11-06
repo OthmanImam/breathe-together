@@ -10,64 +10,137 @@ toward slow, quiet breathing over the course of a short session.
 > implications about your body — only what the camera saw during the session
 > and how the pacing responded.
 
-## Status — Phase 1 (foundation only)
+## Status — Phase 2 (working solo app)
 
-No UI and no real SDK integration yet. What exists:
+A complete browser session: consent → setup → session (pacer orb + tones) →
+observation-only summary. Two signal sources, one coach:
 
-- `docs/SDK_NOTES.md` — research on `@smartspectra/node-sdk` (install, auth,
-  metric names and payload shapes, validation codes, telemetry) + open
-  questions.
-- `src/config.ts` — every tunable in one documented place.
-- `src/signal/` — `SignalSource` contract, deterministic mock source (5
-  scenarios), and a normalizer (EMA smoothing, plausibility bounds, spike
-  rejection, confidence gating with hold-then-lost).
-- `src/coach/` — pacer (pure timing, next-boundary rate changes), coach state
-  machine (calibrate → match → lead → hold → cooldown), and an
-  observation-only session summary.
-- `src/sim/` — headless simulation CLI and shared harness running at
-  accelerated virtual time.
+- **mock** (default) — a seeded simulation, no camera measurement. The
+  browser still opens the camera after consent (for the preview), but the
+  mock ignores frame content.
+- **sdk** — the real `@smartspectra/node-sdk` in an isolated child process,
+  fed by 320×240 RGBA frames from the browser over WebSocket. Needs an API
+  key (see Setup).
+
+`npm test` runs 97 tests, including protocol validation, room lifecycle,
+server-over-WebSocket integration, signal supervision, SDK mapping, and a
+wording gate that keeps reserved vocabulary out of all shipped copy.
+
+## Setup
+
+```bash
+npm install
+cp .env.example .env   # then fill in your key (sdk mode only)
+```
+
+**Getting a SmartSpectra API key:** sign in at
+<https://physiology.presagetech.com/auth/login> and copy your key into
+`SMARTSPECTRA_API_KEY` in `.env`. (The env-var name is our convention; the
+SDK itself takes the key as a constructor option — see `docs/SDK_NOTES.md`.)
 
 ## Run
 
 ```bash
-npm install
-npm run typecheck   # strict TypeScript
+npm run typecheck   # strict TS for server + client
 npm run lint        # eslint
-npm test            # node:test suite (48 tests)
+npm test            # full test suite
 
-# headless simulation — accelerated time, no camera, prints a timeline:
+npm run serve       # build client + start the server (mock mode, :3000)
+```
+
+Open <http://localhost:3000>, read the consent screen, and begin. Everything
+runs on your machine; the server binds locally.
+
+**SDK mode:**
+
+```bash
+SIGNAL_SOURCE=sdk npm run serve
+```
+
+The server refuses to start in this mode without `SMARTSPECTRA_API_KEY`
+(fail-fast with a clear message). The SDK child process is spawned per
+session and killed when the session ends; a daily budget
+(`config.sdk.dailyCapMinutes`, default 60) stops measurement when reached,
+with a plain notice in the UI.
+
+**SDK smoke test** (loads the real native SDK, lists cameras, and with a key
+runs a 30 s synthetic-frame session — samples only, no images):
+
+```bash
+npm run smoke:sdk                         # keyless: load + discovery only
+SMARTSPECTRA_API_KEY=… npm run smoke:sdk  # full 30 s check
+```
+
+**Headless simulation** (Phase 1; deterministic, accelerated time):
+
+```bash
 npm run simulate -- --scenario agitated_then_settling --minutes 3 --seed 42
 ```
 
-Simulation scenarios: `calm`, `agitated_then_settling`, `ignores_pacer`,
-`dropout`, `bad_light`. Options: `--minutes` 3/5/10 (default 3), `--seed`
-integer (same seed = identical run).
+Scenarios: `calm`, `agitated_then_settling`, `ignores_pacer`, `dropout`,
+`bad_light`. `--minutes` 3/5/10, `--seed` for byte-identical replays.
 
-`npm run dev` reruns the agitated-then-settling simulation in watch mode.
+## Environment variables
+
+| Name | Default | Meaning |
+| --- | --- | --- |
+| `SIGNAL_SOURCE` | `mock` | `mock` or `sdk` |
+| `SMARTSPECTRA_API_KEY` | — | Required for `sdk` mode |
+| `PORT` | `3000` | HTTP/WebSocket port |
+| `NODE_ENV` | unset | `production` disables dev controls |
+
+## Troubleshooting
+
+- **"No clear view" notices:** move to even light, face the camera, center
+  your face in the preview. The Setup screen shows live guidance.
+- **Camera permission denied:** allow it in the browser, or choose
+  *Continue with guide only* on the consent screen — a steady pacer with
+  no sensing.
+- **Signal lag:** camera-derived breathing estimates update gradually (tens
+  of seconds to settle). The coach's 45 s calibration phase absorbs this
+  by design; don't chase the number.
+- **SDK errors / credits:** the server logs SDK error codes; a daily cap
+  stops measurement politely when the budget is spent.
+- **WebSocket drop:** the session ends safely, the camera turns off, and a
+  reconnect is offered.
+
+## Known limitations
+
+- Solo mode only (pair mode is designed for, not built).
+- SDK sample cadence (Hz) is undocumented; the normalizer is time-based, so
+  this changes nothing structurally, but mock realism vs. real cadence is
+  unverified until a live keyed run.
+- The minimum frame rate/resolution the engine accepts is undocumented; the
+  app sends 320×240 at 15 fps and watches validation codes for feedback.
+- A live authenticated SDK session has not been run from this repo yet (no
+  key in the build environment); the IPC path is covered by tests using a
+  fake SDK, and the keyless smoke verifies native load + camera discovery.
 
 ## Structure
 
 ```
 src/
-  config.ts              all tunables, documented
-  signal/SignalSource.ts contract + types (what the real SDK source will implement)
-  signal/mockSource.ts   seeded, scenario-driven mock
-  signal/normalizer.ts   smoothing, bounds, spikes, hold/lost
-  coach/pacer.ts         inhale/exhale timing as a pure function of time
-  coach/stateMachine.ts  calibrate/match/lead/hold/cooldown + events
-  coach/summary.ts       observation-only wording (regression-tested)
-  sim/harness.ts         deterministic pipeline wiring on a virtual clock
-  sim/run.ts             CLI
+  config.ts               all tunables, documented
+  signal/                 SignalSource contract, normalizer, mock,
+                          supervisor, SDK source + worker + mapping, fake SDK
+  coach/                  pacer, state machine, observation-only summary
+  server/                 protocol, rooms, session pipeline, express+ws
+  client/                 browser app (camera, ws, audio, orb, main)
+  sim/                    headless simulation CLI + harness
+public/                   static client HTML/CSS (+ built assets, git-ignored)
 docs/
-  SDK_NOTES.md
-  ARCHITECTURE.md
+  SDK_NOTES.md            SDK research + Phase 2 integration decisions
+  ARCHITECTURE.md         system diagram, pacer sync, failure modes
+  CONSENT_AND_DATA.md     consent + data handling, matching actual behavior
+  DEMO_SCRIPT.md          narrated walkthrough for a live demo
 ```
 
 ## Hard rules honored in this repo
 
-- Wellness/relaxation only; all observation wording is deliberately neutral
-  (the wording-safety test enforces a restricted-terms list over summary and
-  notice copy).
-- No SDK API is invented: Phase 1 contains no SDK code; unknowns are in
-  `docs/SDK_NOTES.md`, everything else runs on the mock.
+- Wellness/relaxation only; user-facing copy is observation-only (enforced
+  by `test/wordingGate.test.ts` across `src/`, `docs/`, `public/`).
+- No SDK API is invented: unknowns live in `docs/SDK_NOTES.md` and degrade
+  honestly (never guessed).
+- Camera only after explicit consent; Stop is always visible; consent is
+  per page load; nothing is saved by default.
 - No secrets: `.env` is git-ignored; `.env.example` holds only empty keys.

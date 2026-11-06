@@ -70,31 +70,62 @@ test in `test/stateMachine.test.ts`).
 Pacer changes take effect at the next cycle boundary — a mid-breath rate
 change never distorts a breath in flight.
 
-## Phase 2+ (planned, not in this phase)
+## Phase 2 (built): browser app + real SDK in an isolated process
 
-- **Real SDK source, isolated child process.** `SmartspectraSource implements
-  SignalSource`. Rationale and details: SmartSpectra's native state is
-  process-global, its engine is a heavy native pipeline, and one bad frame
-  chunk should not take the app down — so the SDK lives in a dedicated child
-  process owned and watchdogged by the host. This also lines up with the
-  community report (unconfirmed) that the Node SDK misbehaved when fed 30 fps
-  frames from a frontend: the child process owns the frames path
-  (`useCustomInput` + `sendFrame`), subscribes to `'frameSentThrough'`
-  back-pressure feedback, and restarts cleanly on `kError`.
-- **WebSocket frame bridge.** Browser UI captures camera frames
-  (`getUserMedia`), streams them over a local WebSocket to the Node host,
-  which pipes them into the child process. Host stamping of monotonic
-  timestamps (`process.hrtime.bigint()`) per the SDK's own guidance.
-- **Browser UI.** Phase-1 headless harness logic is UI-agnostic; the UI
-  subscribes to the same coach events (state, notice, pacer rate) plus the
-  pacer snapshot breath-in/breath-out cue.
+```mermaid
+flowchart LR
+  subgraph browser["Browser (public/)"]
+    UI[Consent > Setup > Session > Summary<br/>camera.ts owns getUserMedia<br/>audio.ts synthesizes tones]
+    UI -->|WS JSON control| WS
+    UI -->|WS binary frames<br/>320x240 RGBA, 15 fps, 8-byte µs header| WS
+  end
+  subgraph server["Local server (src/server)"]
+    WS[express + ws<br/>protocol validation, token-bucket rate limits]
+    WS --> RM[RoomManager<br/>rooms + participants, consent gate]
+    RM --> PP[ParticipantPipeline<br/>source > normalizer > coach > pacer]
+    PP -->|coach events| WS
+    WS -.->|pacer_update 10 Hz<br/>samples, states, notices, summary| UI
+  end
+  subgraph sdkproc["SDK child process (src/signal/sdkWorker.ts)"]
+    SW[SmartSpectraSDK<br/>useCustomInput + sendFrame<br/>breathing metrics only]
+  end
+  PP -->|frames via pushFrame| SS[SdkSource<br/>fork, daily budget cap]
+  SS <-->|typed IPC, advanced serialization| SW
+  SUP[SupervisedSource<br/>silence detect, backoff restart,<br/>guide-only degrade]
+  PP --> SUP --> SS
+```
+
+Key points:
+
+- **Rooms are pair-ready.** A room owns participants; solo is a room of one.
+  Every wire message carries `roomId`/`participantId` from the start, so pair
+  mode later is "add a participant", not a protocol rewrite.
+- **The server never trusts client numbers.** JSON control messages carry no
+  signal data; camera frames feed only SDK-mode sources and are counted
+  (rate-limited) in mock mode.
+- **Pacer sync (10 Hz + client interpolation, chosen over event-only).**
+  The server pushes a pacer snapshot every 100 ms. The client advances each
+  snapshot's phase progress linearly — the same math the server `Pacer`
+  uses within a phase — and re-anchors on every snapshot. Error is therefore
+  bounded by one push interval by construction, and a reconnect resyncs
+  deterministically. `src/client/orb.test.ts` measures this bound against
+  the real `Pacer` over a simulated 10-minute session (max scale error
+  ≤ 0.03, phase disagreement ≤ one push interval).
+- **Failure modes.** Signal loss → normalizer holds, then `lost`; the pacer
+  keeps cycling and the UI shows a calm notice. Source crash → supervisor
+  restarts with backoff (max 3), then degrades to guide-only (steady pacer,
+  no sensing) with an honest notice. Camera denied → guide-only offer.
+  WebSocket drop → session ends, camera off, reconnect offered. The SDK
+  child is spawned only for a session and killed on stop/consent-revoke.
+- **Privacy surface.** The worker sets `enableTelemetry: false`. Nothing is
+  logged except counters and ids. See `docs/CONSENT_AND_DATA.md`.
+
+## Later (not in this phase)
+
 - **Pair mode.** Two independent signal→coach pipelines (one per camera),
   one shared slow tempo whose rate change steps are halved and applied only
   when both participants are inside the follow tolerance. Same constants,
   same wording rules.
-- **Privacy tuning.** `enableTelemetry = false` in our wrapper by default;
-  plain-language disclosure as described in `docs/SDK_NOTES.md §10` before
-  any public build.
 
 The governing sentence for everything above: **slow control loop,
 confidence-gated, never scold.**

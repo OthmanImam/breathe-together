@@ -76,9 +76,7 @@ export function buildSummaryLines(d: SummaryData): string[] {
 
 /**
  * Reserved restricted terms derived from the project's hard rules
- * (docs list them as banned in code, comments, strings, and docs):
- * diagnosing, medicating, curing, weighted emotional labels, organ-health
- * framing, professional-context claims, regulatory claims.
+ * (docs list them as banned in code, comments, strings, and docs).
  * (Kept deliberately lowercase; matching is case-insensitive.)
  */
 export const FORBIDDEN_TERMS: readonly string[] = [

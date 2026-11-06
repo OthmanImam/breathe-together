@@ -98,7 +98,7 @@ export interface CooldownSettings {
 export interface SessionSettings {
   /** Default session length. Options: 3 / 5 / 10 minutes. */
   defaultMinutes: SessionMinutes;
-  /** Signal treated as unavailable for at least this long before a steady-pace notice (seconds). */
+  /** Signal counted unavailable for at least this long before a steady-pace notice (seconds). */
   unavailableNoticeSeconds: number;
 }
 

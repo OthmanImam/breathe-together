@@ -75,7 +75,7 @@ export class CameraManager {
     video.srcObject = stream;
     for (const track of stream.getVideoTracks()) {
       track.addEventListener("ended", () => {
-        // Unplugged / revoked by the OS: treat like a stop, and tell the UI.
+        // Unplugged / revoked by the OS: handle like a stop, and tell the UI.
         if (this.stream === stream) {
           this.stream = undefined;
           this.onUnexpectedEnd();
