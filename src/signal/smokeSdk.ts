@@ -97,6 +97,23 @@ async function main(): Promise<void> {
   });
   sdk.on("error", (code: number, message: string, retryable: boolean) => {
     console.log(`[smoke] SDK error code=${code} retryable=${retryable}: ${message}`);
+    if (code === 2 || code === 4) {
+      // kAuthenticationFailed / kCreditExhausted: fail fast with the verdict
+      // instead of feeding 30 s of frames the engine will only refuse.
+      console.log(
+        "[smoke] VERDICT: the key/credits were rejected. Check the key in " +
+          ".env and its plan/credits at the developer portal, then re-run.",
+      );
+      clearInterval(timer);
+      void (async () => {
+        try {
+          await sdk.stopAsync();
+          await sdk.destroy();
+        } finally {
+          process.exit(1);
+        }
+      })();
+    }
   });
   sdk.start();
 

@@ -550,6 +550,11 @@ stand alone with the mock and Step 6 ships as a documented, testable adapter
   the fake SDK injected (`BT_FAKE_SDK=1`, test `sdkSource.test.ts`),
   mapping/failure-mode unit tests, and the startup guard (server refuses
   `SIGNAL_SOURCE=sdk` without a key with a clear message).
+- **Breathing-rate semantics (from the live metrics overview):** the rate
+  is a **30-second average**, and its confidence is **0 until the full 30 s
+  window is reached**. That is why the coach's 45 s calibration phase is
+  sized as it is — first trustworthy readings arrive around the 30 s mark,
+  and the README's "tens of seconds" guidance is now precise.
 - **Live keyed run (2026-11-06, 30 s smoke):** with a real key, the session
   authenticated and validation statuses flowed correctly (`kOk` "Hold still
   and record", then `kNoFaceFound` on synthetic gray frames). The engine
