@@ -75,6 +75,42 @@ test("frames with the wrong pixel count are dropped; correct frames reach sendFr
   worker.handleMessage({ type: "shutdown" });
 });
 
+test("kProcessingFailed wedges the engine: worker recovers via reset() and resumes frames", async () => {
+  const { worker, out } = makeWorker();
+  worker.handleMessage({ type: "init", apiKey: "k", frameWidth: 320, frameHeight: 240 });
+  const inst = FakeSmartSpectraSDK.instances[0]!;
+  worker.handleMessage({
+    type: "frame",
+    timestampUs: 1000,
+    pixels: new Uint8Array(320 * 240 * 4),
+  });
+  assert.equal(inst.framesReceived, 1);
+
+  // Wedge: engine errors AND starts refusing frames.
+  inst.wedge();
+  worker.handleMessage({
+    type: "frame",
+    timestampUs: 2000,
+    pixels: new Uint8Array(320 * 240 * 4),
+  });
+  // Recovery is async (microtask); wait for it.
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(inst.resetCount >= 1, "reset() was called to rebuild the pipeline");
+  assert.ok(
+    out.some((m) => m.type === "error" && m.code === "sdk_error_8"),
+    "the failure was reported to the parent",
+  );
+  // After recovery, frames flow again (reset/start are synchronous native
+  // calls, so the wedged frame may have been accepted post-recovery).
+  worker.handleMessage({
+    type: "frame",
+    timestampUs: 3000,
+    pixels: new Uint8Array(320 * 240 * 4),
+  });
+  assert.ok(inst.framesReceived >= 2, "frames accepted after recovery");
+  worker.handleMessage({ type: "shutdown" });
+});
+
 test("shutdown stops and destroys the SDK", async () => {
   const { worker, out } = makeWorker();
   worker.handleMessage({ type: "init", apiKey: "k", frameWidth: 320, frameHeight: 240 });

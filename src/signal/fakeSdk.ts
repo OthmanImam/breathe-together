@@ -48,9 +48,26 @@ export class FakeSmartSpectraSDK {
   }
 
   sendFrame(): boolean {
+    if (this.wedged) {
+      throw new Error("SmartSpectra is not in a valid state for this operation.");
+    }
     this.framesReceived++;
     return true;
   }
+
+  /** Test hook: wedge the engine like kProcessingFailed does. */
+  wedge(): void {
+    this.wedged = true;
+    this.emit("error", 8, "SmartSpectra processing failed.", true);
+  }
+
+  resetCount = 0;
+  reset(): void {
+    this.resetCount++;
+    this.wedged = false;
+  }
+
+  private wedged = false;
 
   async stopAsync(): Promise<void> {
     this.startLogStop();

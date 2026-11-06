@@ -48,6 +48,8 @@ export interface SdkInstanceLike {
     pixelFormat: number,
     timestampUs: number,
   ): boolean;
+  /** Rebuild the pipeline after kProcessingFailed / kError (docs lifecycle). */
+  reset?(): void;
   stopAsync(): Promise<void>;
   destroy(): Promise<void>;
 }
@@ -93,9 +95,34 @@ export function createSdkWorker(deps: WorkerDeps): SdkWorkerHandle {
   let frameHeight = 0;
   let status: SignalStatus = "starting";
   let shuttingDown = false;
+  // After kProcessingFailed the engine refuses frames ("not in a valid
+  // state for this operation") until reset(). Frames are dropped meanwhile;
+  // the supervisor's silence-restart is the slower backstop.
+  let broken = false;
+  let recovering = false;
 
   function fail(code: string, message: string, retryable: boolean): void {
     deps.send({ type: "error", code, message, retryable });
+  }
+
+  /** Rebuild the SDK pipeline after kProcessingFailed (docs lifecycle). */
+  function recover(): void {
+    if (recovering || shuttingDown) return;
+    broken = true;
+    recovering = true;
+    void (async () => {
+      try {
+        sdk?.reset?.();
+        sdk?.useCustomInput(deps.sdk.FrameTransform.kNone);
+        sdk?.start();
+        deps.log?.("SDK pipeline rebuilt after processing failure.");
+      } catch (err) {
+        deps.log?.(`SDK rebuild failed: ${String(err)}`);
+      } finally {
+        broken = false;
+        recovering = false;
+      }
+    })();
   }
 
   const worker: SdkWorkerHandle = {
@@ -133,7 +160,7 @@ export function createSdkWorker(deps: WorkerDeps): SdkWorkerHandle {
         return;
       }
       if (msg.type === "frame") {
-        if (!sdk || shuttingDown) return;
+        if (!sdk || shuttingDown || broken || recovering) return;
         const expected = frameWidth * frameHeight * 4;
         if (msg.pixels.length !== expected) return; // wrong geometry: drop, don't guess
         try {
@@ -146,7 +173,10 @@ export function createSdkWorker(deps: WorkerDeps): SdkWorkerHandle {
             msg.timestampUs,
           );
         } catch (err) {
-          deps.log?.(`sendFrame failed: ${String(err)}`);
+          // Engine in an error state refuses frames; a kProcessingFailed
+          // event normally arrives alongside and starts recovery too.
+          deps.log?.(`sendFrame refused (engine error state): ${String(err)}`);
+          recover();
         }
         return;
       }
@@ -196,6 +226,10 @@ export function createSdkWorker(deps: WorkerDeps): SdkWorkerHandle {
     });
     instance.on("error", (code: number, message: string, retryable: boolean) => {
       fail(`sdk_error_${code}`, `SDK error code ${code}: ${message}`, retryable);
+      // kProcessingFailed (8): the pipeline is wedged — reset() rebuilds it,
+      // the input source must be re-selected, then start() again (docs
+      // lifecycle). Runs once per burst; frames drop while recovering.
+      if (code === 8) recover();
     });
   }
 

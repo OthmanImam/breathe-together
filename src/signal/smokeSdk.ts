@@ -102,9 +102,17 @@ async function main(): Promise<void> {
 
   const gray = new Uint8Array(FRAME_W * FRAME_H * 4).fill(128);
   const t0 = Date.now();
+  let refusedFrames = 0;
   const timer = setInterval(() => {
     const tsUs = Math.round((Date.now() - t0) * 1000);
-    sdk.sendFrame(gray, FRAME_W, FRAME_H, FRAME_W * 4, sdkPkg.PixelFormat.kRGBA, tsUs);
+    try {
+      sdk.sendFrame(gray, FRAME_W, FRAME_H, FRAME_W * 4, sdkPkg.PixelFormat.kRGBA, tsUs);
+    } catch (err) {
+      refusedFrames++;
+      if (refusedFrames === 1) {
+        console.log(`[smoke] sendFrame refused (engine error state): ${String(err)}`);
+      }
+    }
   }, FRAME_INTERVAL_MS);
 
   await new Promise((r) => setTimeout(r, DURATION_MS));
@@ -112,7 +120,7 @@ async function main(): Promise<void> {
   await sdk.stopAsync();
   await sdk.destroy();
   console.log(
-    `[smoke] done. samples=${samples} lastStatus=${status}. ` +
+    `[smoke] done. samples=${samples} lastStatus=${status} refusedFrames=${refusedFrames}. ` +
       "(Synthetic gray frames are expected to yield no face / no rate; " +
       "a real face in front of a real camera is the remaining manual check.)",
   );
