@@ -543,14 +543,27 @@ stand alone with the mock and Step 6 ships as a documented, testable adapter
   Buffer unless a class is registered — the `/messages` path avoids that.
 - Telemetry: `enableTelemetry: false` is set in the worker (verified option
   in the installed `index.d.ts`), so `docs/CONSENT_AND_DATA.md §5` holds.
-- **No API key was available in this environment**, so a live authenticated
-  session could not be run here. What was verified end-to-end instead:
-  native load + camera discovery (`npm run smoke:sdk` keyless portion), the
-  full IPC path through the real worker process with the fake SDK injected
-  (`BT_FAKE_SDK=1`, test `sdkSource.test.ts`), mapping/failure-mode unit
-  tests, and the startup guard (server refuses `SIGNAL_SOURCE=sdk` without a
-  key with a clear message). The remaining manual check with a key:
-  `SMARTSPECTRA_API_KEY=… npm run smoke:sdk`, then a real session.
+- **No API key was available in this environment at first**, so a live
+  authenticated session could not be run during the build. What was verified
+  end-to-end instead: native load + camera discovery (`npm run smoke:sdk`
+  keyless portion), the full IPC path through the real worker process with
+  the fake SDK injected (`BT_FAKE_SDK=1`, test `sdkSource.test.ts`),
+  mapping/failure-mode unit tests, and the startup guard (server refuses
+  `SIGNAL_SOURCE=sdk` without a key with a clear message).
+- **Live keyed run (2026-11-06, 30 s smoke):** with a real key, the session
+  authenticated and validation statuses flowed correctly (`kOk` "Hold still
+  and record", then `kNoFaceFound` on synthetic gray frames). The engine
+  then raised `kProcessingFailed` (code 8, retryable) — plausibly because
+  constant gray frames give the engine nothing to work with, but a wedge is
+  a wedge either way: after that, `sendFrame()` throws "not in a valid
+  state for this operation" until the pipeline is rebuilt. The worker now
+  recovers via `reset()` + re-select custom input + `start()` (docs
+  lifecycle), drops frames meanwhile, and reports the failure; the
+  supervisor's backoff restart remains the backstop. 0 rate samples with
+  gray frames is the expected outcome; the remaining manual check is one
+  real session with a real face (fresh frames per call — see open
+  question 9: whether the minimum frame rate/resolution the engine accepts
+  is met by 320×240 @ 15 fps is still untested with real video).
 - Daily/session budget: `config.sdk.dailyCapMinutes` (60) enforced via the
   git-ignored `.bt-usage.json` counter; the SDK source refuses to start at
   the cap and the UI shows the capped notice.
