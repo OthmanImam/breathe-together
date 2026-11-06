@@ -9,9 +9,9 @@
   },
   "scripts": {
     "dev": "tsx watch src/sim/run.ts -- --scenario agitated_then_settling --minutes 1 --seed 7",
-    "serve": "npm run build:client && tsx src/server/index.ts",
+    "serve": "npm run build:client && node --import tsx --env-file-if-exists=.env src/server/index.ts",
     "build:client": "tsc -p tsconfig.client.json",
-    "smoke:sdk": "tsx src/signal/smokeSdk.ts",
+    "smoke:sdk": "node --import tsx --env-file-if-exists=.env src/signal/smokeSdk.ts",
     "simulate": "tsx src/sim/run.ts",
     "test": "node --import tsx --test \"test/*.test.ts\" \"src/client/*.test.ts\"",
     "lint": "eslint .",
