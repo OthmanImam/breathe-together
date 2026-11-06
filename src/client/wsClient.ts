@@ -18,6 +18,8 @@ export class WsClient {
   private state: ConnectionState = "closed";
   private messageCb: (m: ServerMessage) => void = () => undefined;
   private stateCb: (s: ConnectionState) => void = () => undefined;
+  /** Messages sent before the socket opens are queued, not dropped. */
+  private readonly queue: string[] = [];
 
   onMessage(cb: (m: ServerMessage) => void): void {
     this.messageCb = cb;
@@ -34,7 +36,14 @@ export class WsClient {
     const socket = new WebSocket(url);
     this.socket = socket;
     this.setState("connecting");
-    socket.addEventListener("open", () => this.setState("open"));
+    socket.addEventListener("open", () => {
+      this.setState("open");
+      // Flush anything queued while connecting (e.g. the initial hello —
+      // dropping it leaves the server waiting forever).
+      while (this.queue.length > 0 && socket.readyState === WebSocket.OPEN) {
+        socket.send(this.queue.shift()!);
+      }
+    });
     socket.addEventListener("close", () => {
       if (this.socket === socket) this.setState("closed");
     });
@@ -49,9 +58,14 @@ export class WsClient {
   }
 
   send(msg: ClientMessage): void {
+    const payload = JSON.stringify(msg);
     if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(msg));
+      this.socket.send(payload);
+      return;
     }
+    // Still connecting (or reconnecting): queue for the open flush. Bounded
+    // so a dead connection can't grow this forever.
+    if (this.queue.length < 100) this.queue.push(payload);
   }
 
   /** Send one camera frame: 8-byte µs header + raw RGBA pixels. */
