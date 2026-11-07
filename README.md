@@ -73,6 +73,17 @@ measured phase-lock skew between the two screens):
 npm run simulate:pair -- --a agitated_then_settling --b calm --minutes 3 --seed 7
 ```
 
+## Built with
+
+- [`@smartspectra/node-sdk` v3.4.0](https://www.npmjs.com/package/@smartspectra/node-sdk)
+  (Presage Technologies) — see `NOTICE.md` for attribution and terms.
+- The [`using-smartspectra` agent skill](https://smartspectra.presagetech.com/skill.md)
+  and the [SmartSpectra docs](https://smartspectra.presagetech.com/) —
+  every SDK decision in `docs/SDK_NOTES.md` traces to a published page.
+- The [model cards and limitations](https://smartspectra.presagetech.com/docs/model-cards-and-limitations.md),
+  one of which pins the breathing-rate facts our coach is tuned around:
+  a 30-second trailing average, confidence 0 until the window fills.
+
 **SDK mode:**
 
 ```bash

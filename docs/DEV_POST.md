@@ -5,6 +5,19 @@
 > and how a shared guide responded. Nothing is a verdict about anyone's
 > body or state of mind.
 
+## About the build
+
+Breathe Together is a camera-driven breathing coach built on the
+SmartSpectra SDK (`@smartspectra/node-sdk` v3.4.0, Presage Technologies —
+see `NOTICE.md`). Development used Presage's agent toolchain: the
+`using-smartspectra` agent skill, the published Node.js docs (every
+integration decision traces to a page — see `docs/SDK_NOTES.md`), and the
+model cards, whose 30-second breathing window is the single most
+consequential number in the coach's tuning. Telemetry is disabled
+(`enableTelemetry: false`), credits are budgeted per participant-minute,
+and a live smoke confirms graceful handling of auth failures rather than
+silent guesses.
+
 ## Creative — the shared breathing visual
 
 A breathing coach is usually one person, one camera, one circle. The
