@@ -3,10 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="A quiet breathing guide for one or two people." />
     <title>Breathe Together</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#app">Skip to main content</a>
     <header class="topbar">
       <span class="brand">Breathe Together</span>
       <span id="camera-indicator" class="camera-indicator" hidden>
@@ -20,6 +23,7 @@
       <!-- Consent: always the first screen. Nothing touches the camera or the
            network beyond the page load until the user agrees here. -->
       <section id="screen-consent" class="screen" aria-labelledby="consent-heading">
+        <p class="eyebrow">A quiet guide</p>
         <h1 id="consent-heading">A quiet minute with your camera</h1>
         <p>
           Breathe Together watches your breathing over your webcam and adjusts
@@ -77,6 +81,7 @@
 
       <!-- Setup: session length, options, live preview with framing guidance. -->
       <section id="screen-setup" class="screen" aria-labelledby="setup-heading" hidden>
+        <p class="eyebrow">Take your time</p>
         <h1 id="setup-heading">Get comfortable</h1>
         <video id="preview-video" class="preview" muted playsinline aria-label="Camera preview"></video>
         <p id="setup-guidance" class="guidance" aria-live="polite">Looking at the camera…</p>
@@ -140,6 +145,7 @@
 
       <!-- Pair lobby: code, both people, ready states, host starts. -->
       <section id="screen-lobby" class="screen" aria-labelledby="lobby-heading" hidden>
+        <p class="eyebrow">Pair room</p>
         <h1 id="lobby-heading">Waiting together</h1>
         <p>Room code: <strong id="room-code" class="room-code">——</strong></p>
         <ul id="lobby-participants" class="participants"></ul>
@@ -155,11 +161,12 @@
 
       <!-- Session: pacer orb, rate, state, notices. -->
       <section id="screen-session" class="screen" aria-labelledby="session-state" hidden>
+        <p class="eyebrow">Guide in view</p>
         <h1 id="session-state">Settling in</h1>
         <div id="pair-visual" class="orb-wrap pair-visual" hidden>
-          <div class="orb-pair">
+          <div id="orb-pair" class="orb-pair">
             <div id="orb-peer" class="orb orb-peer" role="img" aria-label="Partner breathing guide"></div>
-            <div id="orb-self" class="orb" role="img" aria-label="Your breathing guide"></div>
+            <div id="orb-self" class="orb orb-self" role="img" aria-label="Your breathing guide"></div>
           </div>
           <div id="shared-glow" class="shared-glow" aria-hidden="true"></div>
         </div>
@@ -191,6 +198,7 @@
 
       <!-- Summary: observation-only lines from the server. -->
       <section id="screen-summary" class="screen" aria-labelledby="summary-heading" hidden>
+        <p class="eyebrow">Observation only</p>
         <h1 id="summary-heading">Session note</h1>
         <div id="summary-lines"></div>
         <div id="pair-summary" hidden>
