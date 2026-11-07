@@ -202,32 +202,44 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     conn.room = undefined;
     conn.participantId = undefined;
     conn.consentGranted = false;
-    if (room?.isPair) {
+    if (!room) {
+      manager.removeParticipant(roomId, pid);
+      return;
+    }
+    if (room.isPair) {
       // A side is leaving: their proposal drops out of the shared rate and
       // alignment freezes (their latest sample goes stale naturally).
       const feeds = pairFeeds.get(roomId);
-      const leaverPipeline = participant?.pipeline;
       for (const entry of feeds ?? []) {
-        if (entry.pipeline === leaverPipeline) entry.remove();
+        if (entry.pipeline === participant?.pipeline) entry.remove();
       }
       if (isHost) {
+        // Host leaving closes the pair room for everyone.
         for (const c of connsInRoom(roomId)) {
           send(c, {
             type: "room_closed",
             reason: "The host left, so the room closed. Cameras are off.",
           });
         }
-      } else {
-        broadcastToRoom(roomId, { type: "peer_left", label }, undefined);
+        for (const id of [...room.participants().keys()]) {
+          manager.removeParticipant(roomId, id);
+        }
+        for (const c of connsInRoom(roomId)) {
+          c.room = undefined;
+          c.participantId = undefined;
+        }
+        pairFeeds.delete(roomId);
+        for (const key of [...lastPeerStatus.keys()]) {
+          if (key.startsWith(`${roomId}/`)) lastPeerStatus.delete(key);
+        }
+        return;
       }
-      // Remove everyone (destroys pipelines, stops sources, releases cameras).
-      for (const id of [...room.participants().keys()]) {
-        manager.removeParticipant(roomId, id);
-      }
-      for (const c of connsInRoom(roomId)) {
-        c.room = undefined;
-        c.participantId = undefined;
-      }
+      // Joiner leaving: remove only that side; the host continues with the
+      // shared rate following their proposal alone, and is told calmly.
+      broadcastToRoom(roomId, { type: "peer_left", label }, undefined);
+      manager.removeParticipant(roomId, pid);
+      if (room.participants().size === 0) pairFeeds.delete(roomId);
+      broadcastRoomState(roomId);
       return;
     }
     manager.removeParticipant(roomId, pid);
@@ -728,15 +740,17 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
         }
         // Pair coordinator: one shared pacer over both pipelines' proposals.
         if (everyone.length >= 2) {
-          const feeds = everyone.map((p) => pipelineFeed(p.pipeline));
-          const coach = new RoomCoach({
-            clock: manager.internal.clock,
-            settings: settings,
-            feeds: [feeds[0]!, feeds[1]!],
-          });
-          room.roomCoach = coach;
-          for (const p of everyone) p.pipeline.setSharedPacer(coach.pacer);
-          coach.onEvent((ev) => {
+          if (room.roomCoach) room.roomCoach.restart();
+          else {
+            const feeds = everyone.map((p) => pipelineFeed(p.pipeline));
+            const coach = new RoomCoach({
+              clock: manager.internal.clock,
+              settings: settings,
+              feeds: [feeds[0]!, feeds[1]!],
+            });
+            room.roomCoach = coach;
+            for (const p of everyone) p.pipeline.setSharedPacer(coach.pacer);
+            coach.onEvent((ev) => {
             if (ev.type === "alignment_update") {
               const st = ev.state;
               broadcastToRoom(room.id, {
@@ -755,14 +769,15 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
                   : {}),
               });
             }
-          });
-          pairFeeds.set(
-            room.id,
-            feeds.map((feed, i) => ({
-              pipeline: everyone[i]!.pipeline,
-              remove: () => coach.removeFeed(feed),
-            })),
-          );
+            });
+            pairFeeds.set(
+              room.id,
+              feeds.map((feed, i) => ({
+                pipeline: everyone[i]!.pipeline,
+                remove: () => coach.removeFeed(feed),
+              })),
+            );
+          }
         }
         room.sessionStarted = true;
         broadcastRoomState(room.id);

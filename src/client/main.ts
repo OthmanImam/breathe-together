@@ -89,15 +89,8 @@ class App {
   // -- pair state ------------------------------------------------------------
   private pairMode = false;
   private pairActive = false;
-  private isHost = false;
   private roomCode = "";
   private selfLabel = "";
-  private roster: Array<{
-    id: string;
-    label: string;
-    ready: boolean;
-    consent: boolean;
-  }> = [];
   private alignment: { value?: number; stale: boolean; waiting: boolean } | undefined;
   private pairSummary: { band: string } | undefined;
 
@@ -199,6 +192,11 @@ class App {
       this.handleBegin(),
     );
     el<HTMLButtonElement>("again-button").addEventListener("click", () => {
+      if (this.pairActive) {
+        // Pair sessions restart from the lobby (the room persists).
+        this.showScreen("lobby");
+        return;
+      }
       this.showScreen("setup");
       if (!this.guideOnly) this.ws.send({ type: "preview_start" });
     });
@@ -434,7 +432,6 @@ class App {
           : bothReady
             ? "Everyone is ready. The host can start."
             : "When both people are ready, the host can start.";
-    this.roster = msg.participants;
     if (msg.phase === "session") {
       this.sessionActive = true;
       this.sessionStartedAt = performance.now();
@@ -488,7 +485,6 @@ class App {
       }
       case "room_created":
         this.roomCode = msg.code;
-        this.isHost = true;
         el("room-code").textContent = msg.code;
         break;
       case "room_state":

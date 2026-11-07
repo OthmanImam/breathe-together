@@ -187,6 +187,14 @@ export class RoomCoach {
 
   private readonly freshHistory: Array<{ t: number; value: number }> = [];
 
+  /** Reset for a new session in the same room (tracker + history cleared). */
+  restart(): void {
+    this.tracker.reset();
+    this.freshHistory.length = 0;
+    this.pairEndedEmitted = false;
+    this.alignment = { value: undefined, stale: true, waiting: true };
+  }
+
   /** Mean alignment over fresh (non-stale) time — the summary input. */
   pairSummaryStats(): { meanAlignment: number | undefined; freshSeconds: number } {
     if (this.freshHistory.length === 0) {
