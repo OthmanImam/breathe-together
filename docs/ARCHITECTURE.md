@@ -120,12 +120,53 @@ Key points:
 - **Privacy surface.** The worker sets `enableTelemetry: false`. Nothing is
   logged except counters and ids. See `docs/CONSENT_AND_DATA.md`.
 
+## Pair mode (Phase 3): two browsers, one host, one shared pacer
+
+```mermaid
+flowchart LR
+  subgraph pairbrowser["Pair browsers (host + joiner)"]
+    BH[Host browser<br/>consent, camera, orbs] -->|frames A| WS2
+    BJ[Joiner browser<br/>consent, camera, orbs] -->|frames B| WS2
+    WS2 --> BH & BJ
+  end
+  subgraph pairserver["Host server"]
+    RM2[RoomManager<br/>rooms, codes, host, ready]
+    RM2 --> RC[RoomCoach<br/>ONE shared pacer = max of proposals<br/>alignment via sync.ts]
+    RC -->|shared snapshot 10 Hz| WS2
+    PP1[Pipeline A] --> RC
+    PP2[Pipeline B] --> RC
+    supA[SupervisedSource A] --> SS1[SdkSource A] --> SW1[SDK worker A]
+    supB[SupervisedSource B] --> SS2[SdkSource B] --> SW2[SDK worker B]
+    PP1 --> supA
+    PP2 --> supB
+  end
+```
+
+- **Shared pacer rule (3d):** shared rate = max of the two solo coaches'
+  proposals — the gentler (slower-to-descend) one wins. A shared Lead step
+  therefore needs both coaches proposing it; one lost participant holds the
+  shared rate steady.
+- **Alignment (3c):** `sync.ts` blends rate agreement + guide-following (min
+  of the two), smoothed with τ ≥ 30 s (the reporting window) and a
+  hysteresis band; freezes when either side is unobservable, shows
+  "waiting" after 30 s frozen. **All thresholds UNVALIDATED** (no
+  real-face data exists yet — see `docs/PAIR_DESIGN.md`).
+- **PeerLink seam:** `RoomCoach` and `sync.ts` consume abstract feeds
+  (proposals, states, normalized samples) — never sockets — so a future
+  relay topology (local instances, abstract values only) can reuse them.
+- **Privacy:** the server never relays raw frames to the peer and never
+  relays rates unless that participant opted in (tested). Consent is per
+  person; the joiner's consent screen names the host as the recipient of
+  their frames.
+- **Quota:** each side's usage is counted per participant-minute (two
+  workers run concurrently); pair starts are refused when the remaining
+  budget can't cover the session.
+
 ## Later (not in this phase)
 
-- **Pair mode.** Two independent signal→coach pipelines (one per camera),
-  one shared slow tempo whose rate change steps are halved and applied only
-  when both participants are inside the follow tolerance. Same constants,
-  same wording rules.
+- **Relay topology** (each person runs a local instance; only abstract
+  values travel through a relay) — described in `docs/PAIR_DESIGN.md §3a`
+  as designed-but-not-built.
 
 The governing sentence for everything above: **slow control loop,
 confidence-gated, never scold.**

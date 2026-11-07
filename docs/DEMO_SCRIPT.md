@@ -62,6 +62,39 @@ fine and predictable; SDK mode if a key is handy) and open the app.
 - WebSocket disconnect → session ends, camera off, calm reconnect offer.
 - SDK credit/cap surprises → the capped notice appears; guide keeps running.
 
+## Pair-mode segment (~4 min, two real people)
+
+**Logistics checklist (before filming):**
+- [ ] Host machine running `npm run serve` (mock is fine for rehearsal)
+- [ ] Joiner's device on an **HTTPS** route (localhost only works for the
+      host; use the workspace tunnel or a local HTTPS origin)
+- [ ] Even light and framing on both sides (Setup screen will say)
+- [ ] Who is host decided; the joiner has the room code in hand
+- [ ] Quota: pair sessions count twice — the lobby shows remaining minutes
+      (demo in mock mode if credits are tight)
+
+**Script:**
+1. **Both consent screens.** The joiner's copy names the host's computer as
+   the recipient of their frames — say that out loud.
+2. **Lobby.** Host creates the room, shows the code; joiner enters it;
+   both labels appear, both press *I'm ready*; the host's *Start together*
+   enables. Point out: no workers started before this moment.
+3. **Session.** Two orbs, one per person, breathing on the shared pacer.
+   The orbs drift closer and the shared glow strengthens as the two
+   measured rates get more similar — with sharing toggled ON for the demo
+   only (explain on camera that it's off by default and shows a number).
+4. **Deliberate divergence.** One person breathes faster on purpose for
+   35–60 s: the alignment view goes dim, the shared guide holds steady —
+   *Staying with you* — it never speeds up to chase anyone and never
+   scolds. Don't promise quick reactions; the coach is slow by design.
+5. **Signal-loss freeze.** Cover one camera briefly: alignment freezes
+   ("Waiting for a clear view…"), the guide keeps cycling, and resumes
+   when the view returns.
+6. **Summary.** Each person sees their own observation-only summary plus
+   one plain-language pair line ("the two measured breathing rates were
+   mostly similar") with its definition behind a tap. *Leave room* and
+   *Delete my data* end things cleanly.
+
 ## After the demo
 
 Point them at `docs/CONSENT_AND_DATA.md` (what leaves the device, what

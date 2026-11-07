@@ -51,6 +51,28 @@ npm run serve       # build client + start the server (mock mode, :3000)
 Open <http://localhost:3000>, read the consent screen, and begin. Everything
 runs on your machine; the server binds locally.
 
+**Pair mode ("Breathe with someone"):**
+
+1. Host: choose *Breathe with someone* in Setup → **Create room** → share
+   the 6-letter code.
+2. Joiner: open the app (HTTPS required off the host machine — localhost
+   works for the host; a phone needs an HTTPS route such as the dev
+   workspace tunnel), read the consent (their frames go to the host machine
+   — the consent screen says so plainly), enter the code, press **I'm
+   ready**.
+3. The host sees both people ready → **Start together**. Each side keeps
+   their own rate private by default; toggle *Share my breathing rate* to
+   see each other's numbers. Pair sessions are capped at 5 minutes and
+   count against the daily SDK budget **twice** (one measurement worker per
+   person) — the lobby shows the remaining budget before starting.
+
+Pair simulation (two mock participants, one coordinator, timeline + the
+measured phase-lock skew between the two screens):
+
+```bash
+npm run simulate:pair -- --a agitated_then_settling --b calm --minutes 3 --seed 7
+```
+
 **SDK mode:**
 
 ```bash
@@ -106,7 +128,12 @@ Scenarios: `calm`, `agitated_then_settling`, `ignores_pacer`, `dropout`,
 
 ## Known limitations
 
-- Solo mode only (pair mode is designed for, not built).
+- Solo mode only in the sense of one person per room; "Breathe with
+  someone" (pair mode) is implemented — see Pair mode above — with a
+  host-topology limit: the joiner's frames travel to the host machine
+  (disclosed in consent), and HTTPS is required for the joiner's camera.
+  Alignment thresholds are **UNVALIDATED** on real data (no real-face
+  results file yet); the mock models the documented 30 s reporting window.
 - SDK sample cadence (Hz) is undocumented; the normalizer is time-based, so
   this changes nothing structurally, but mock realism vs. real cadence is
   unverified until a live keyed run.

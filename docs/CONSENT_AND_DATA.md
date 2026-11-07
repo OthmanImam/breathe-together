@@ -115,6 +115,39 @@ falls back to running on its own (§7).
   observation-only wording, which this app's rules require.
 - No advertising, no fingerprinting, no cross-site tracking.
 
+## 8. Pair mode — data flow
+
+Pair mode runs on **one host server and two browsers**. The host runs the
+local program (server, one SDK worker per participant). The joining
+participant's browser sends frames to the host; the host's own browser sends
+its frames to the same local server. Everything below that is already true
+in solo mode stops being quite so local for the joiner:
+
+| Item | Joiner's device | Host's machine | Other participant |
+| --- | --- | --- | --- |
+| Camera frames | Captured in the browser; sent to host over the connection; discarded in memory after processing | Received, routed to that participant's own measurement worker only; discarded after processing; never stored | **Never received.** The server never relays frames to the other participant |
+| Breathing estimates | Their own estimate arrives back (their screen) | Their own estimate arrives back too | Only the measuring person's own estimate — and only if they toggle sharing on |
+| Alignment | Abstract two-orb visual + band | Same | Same (rate similarity only, no numbers by default) |
+| Peer presence/signals | Abstract status ("waiting for signal") | Same | Same |
+| Consent, labels, room code | Sent (label + code) | Sent (label + code) | Shown as label only |
+| Vendor (Presage) traffic | None directly | Key check, device pairing, metrics authorization, usage verification (§5) — **twice** the usage for a pair session (one worker per participant) | None |
+
+- **Privacy defaults:** each person sees only their own breathing rate.
+  The partner's rate is shown **only** if that person explicitly toggles
+  "Share my breathing rate with my partner" (off by default, revocable
+  anytime, each side labeled with who sees what).
+- **Rooms exist only in memory** and vanish when empty; codes expire after
+  15 minutes unused; nothing about the room is logged beyond ids and
+  counters.
+- **Topology limitation (stated plainly):** the joining participant's
+  frames leave their device and reach the host machine. Camera access
+  requires a secure context (localhost for the host; HTTPS — e.g. a secure
+  tunnel — for another device). If the host is a shared/cloud machine,
+  frames transit that infrastructure. A future relay design (each person
+  runs a local instance; only abstract values travel) would avoid this;
+  it is documented in `docs/PAIR_DESIGN.md` and not yet built.
+
+
 ## 7. Consent behavior
 
 - Consent is per page load: reloading asks again.
@@ -126,3 +159,7 @@ falls back to running on its own (§7).
   work). In guide-only mode nothing is collected.
 - Camera denied/unplugged mid-session ends sensing safely; the camera is
   released rather than left running.
+- **Pair mode:** consent is per person and can never be given for someone
+  else. The joiner's consent screen states plainly that their frames go to
+  the host's computer (see §8). Revoking consent ends only that side; the
+  partner is told calmly and the guide keeps running for them.
