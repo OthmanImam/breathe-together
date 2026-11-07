@@ -473,7 +473,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
           devControls: manager.devControlsAllowed,
         });
         log({
-          event: "connected",
+          event: "hello_received",
           roomId: joined.roomId,
           participantId: joined.participantId,
           source: signalSource,

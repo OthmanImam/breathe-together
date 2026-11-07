@@ -17,10 +17,10 @@ import path from "node:path";
  */
 
 const BANNED =
-  /\b(diagnos\w*|treat|treats|treated|treating|treatment|cure|cures|cured|curing|stress level|anxiety|heart health|clinical|fda)\b/i;
+  /\b(diagnos\w*|treat|treats|treated|treating|treatment|cure|cures|cured|curing|stress level|anxiety|heart health|clinical|fda|connected|bond|compatib\w*|soulmate|relationship|therapy|calm score|mood)\b/i;
 
 const MANDATED_DISCLAIMER = /not (a medical device|for diagnosis or treatment)/i;
-const TERM_LIST_LITERAL = /^[\s*"']*(diagnos|treat|cure|stress level|anxiety|heart health|clinical|fda)["',\s]*$/;
+const TERM_LIST_LITERAL = /^[\s*"']*(diagnos|treat|cure|stress level|anxiety|heart health|clinical|fda|connected|bond|compatib\w*|soulmate|relationship|therapy|calm score|mood)["',\s]*$/;
 
 const ROOTS = ["src", "docs", "public"];
 const ROOT_FILES = ["README.md", ".env.example"];
@@ -60,9 +60,16 @@ test("wording gate: no reserved medical vocabulary outside the mandated disclaim
   const violations: string[] = [];
   for (const file of collectFiles()) {
     const lines = readFileSync(path.join(process.cwd(), file), "utf8").split("\n");
+    let inGuardSection = false;
     lines.forEach((line, idx) => {
+      if (line.startsWith("## Vocabulary guard")) inGuardSection = true;
+      if (line.startsWith("## ") && !line.startsWith("## Vocabulary guard")) {
+        inGuardSection = false;
+      }
       if (!BANNED.test(line)) return;
       if (MANDATED_DISCLAIMER.test(line)) return;
+      // The vocabulary-guard section names the banned words to document them.
+      if (inGuardSection) return;
       if (file === "src/coach/summary.ts" && TERM_LIST_LITERAL.test(line)) return;
       violations.push(`${file}:${idx + 1}: ${line.trim()}`);
     });

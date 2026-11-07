@@ -256,3 +256,160 @@ test("start before consent is refused; consent revocation ends the session", asy
     await srv.close();
   }
 });
+
+test("pair session over two ws clients: create -> join -> ready -> start -> shared run", async () => {
+  const clock = new SimClock();
+  const srv = await startTestServer(clock);
+  const host = await connect(srv.port);
+  const guest = await connect(srv.port);
+  try {
+    host.send({ type: "hello" });
+    await host.waitFor((m) => m.type === "welcome");
+    guest.send({ type: "hello" });
+    await guest.waitFor((m) => m.type === "welcome");
+
+    host.send({ type: "consent_granted" });
+    host.send({ type: "create_room" });
+    const created = await host.waitFor((m) => m.type === "room_created");
+    const code = (created as { code: string }).code;
+    assert.match(code, /^[A-Z0-9]{6}$/);
+
+    guest.send({ type: "consent_granted" });
+    guest.send({ type: "join_room", code, label: "Guest" });
+    const guestState = await guest.waitFor(
+      (m) => m.type === "room_state" && m.participants.length === 2,
+    );
+    assert.equal(guestState.type, "room_state");
+    const hostState = await host.waitFor(
+      (m) => m.type === "room_state" && m.participants.length === 2,
+    );
+    assert.ok(hostState);
+
+    // Host cannot start before everyone agrees and is ready.
+    host.send({ type: "host_start", durationMin: 3 });
+    const early = await host.waitFor(
+      (m) => m.type === "error" && (m as { code: string }).code === "not_all_ready",
+    );
+    assert.ok(early);
+
+    host.send({ type: "participant_ready", ready: true, label: "Host" });
+    guest.send({ type: "participant_ready", ready: true, label: "Guest" });
+    await host.waitFor(
+      (m) =>
+        m.type === "room_state" &&
+        m.participants.every((p) => p.consent && p.ready),
+    );
+
+    host.send({ type: "host_start", durationMin: 3 });
+    await host.waitFor((m) => m.type === "room_state" && m.phase === "session");
+    await guest.waitFor((m) => m.type === "room_state" && m.phase === "session");
+
+    // Run the full 3-minute pair session accelerated.
+    await advance(srv, clock, 3 * 60_000);
+
+    // Both clients got shared pacer streams. (Wait for a session_end first:
+    // TCP ordering means every earlier pacer message has then arrived —
+    // counting immediately after a synchronous advance would race I/O.)
+    await host.waitFor((m) => m.type === "session_end");
+    await guest.waitFor((m) => m.type === "session_end");
+    const hostPacers = host.messages.filter((m) => m.type === "pacer_update").length;
+    const guestPacers = guest.messages.filter((m) => m.type === "pacer_update").length;
+    assert.ok(hostPacers > 1000, `host pacers ${hostPacers}`);
+    assert.ok(guestPacers > 1000, `guest pacers ${guestPacers}`);
+
+    // Phase-lock: identical pacer sequences on both screens (same server
+    // snapshot stream), within same values.
+    const hostSeq = host.messages.filter(
+      (m): m is Extract<ServerMessage, { type: "pacer_update" }> => m.type === "pacer_update",
+    );
+    const guestSeq = guest.messages.filter(
+      (m): m is Extract<ServerMessage, { type: "pacer_update" }> => m.type === "pacer_update",
+    );
+    const n = Math.min(hostSeq.length, guestSeq.length);
+    let maxRateDiff = 0;
+    for (let i = 0; i < n; i += 50) {
+      maxRateDiff = Math.max(maxRateDiff, Math.abs(hostSeq[i]!.rate - guestSeq[i]!.rate));
+    }
+    assert.equal(maxRateDiff, 0, "shared pacer is identical on both screens");
+
+    // Privacy: no peer_rate relayed (nobody opted in), ever.
+    assert.ok(
+      !host.messages.some((m) => m.type === "peer_rate") &&
+        !guest.messages.some((m) => m.type === "peer_rate"),
+      "peer_rate never sent without opt-in",
+    );
+
+    // Alignment updates flowed to both.
+    assert.ok(host.messages.some((m) => m.type === "alignment_update"));
+    assert.ok(guest.messages.some((m) => m.type === "alignment_update"));
+
+    // Pair summary arrived alongside the per-side session ends.
+    const summary = await host.waitFor((m) => m.type === "pair_summary");
+    assert.ok(
+      ["mostly", "partly", "different", "none"].includes(
+        (summary as { band: string }).band,
+      ),
+    );
+  } finally {
+    host.close();
+    guest.close();
+    await srv.close();
+  }
+});
+
+test("peer_rate flows only after the sharer opts in", async () => {
+  const clock = new SimClock();
+  const srv = await startTestServer(clock);
+  const host = await connect(srv.port);
+  const guest = await connect(srv.port);
+  try {
+    host.send({ type: "hello" });
+    await host.waitFor((m) => m.type === "welcome");
+    guest.send({ type: "hello" });
+    await guest.waitFor((m) => m.type === "welcome");
+    host.send({ type: "consent_granted" });
+    host.send({ type: "create_room" });
+    const created = await host.waitFor((m) => m.type === "room_created");
+    guest.send({ type: "consent_granted" });
+    guest.send({ type: "join_room", code: (created as { code: string }).code, label: "Guest" });
+    await guest.waitFor((m) => m.type === "room_state" && m.participants.length === 2);
+    host.send({ type: "participant_ready", ready: true, label: "Host" });
+    guest.send({ type: "participant_ready", ready: true, label: "Guest" });
+    await host.waitFor(
+      (m) => m.type === "room_state" && m.participants.every((p) => p.ready),
+    );
+    host.send({ type: "host_start", durationMin: 3 });
+    await host.waitFor((m) => m.type === "room_state" && m.phase === "session");
+
+    await advance(srv, clock, 20_000);
+    assert.ok(
+      !guest.messages.some((m) => m.type === "peer_rate"),
+      "no rates relayed before opt-in",
+    );
+
+    // Host opts in -> guest starts receiving host rates. (Synchronize on
+    // ping/pong so the server has processed the toggle before advancing —
+    // advances run synchronously and would otherwise beat the message.)
+    host.send({ type: "share_rate_toggle", share: true });
+    host.send({ type: "ping" });
+    await host.waitFor((m) => m.type === "pong");
+    await advance(srv, clock, 10_000);
+    await guest.waitFor(
+      (m) => m.type === "peer_rate" && m.label === "Host",
+      3000,
+    );
+    // Revoking stops the relay again.
+    host.send({ type: "share_rate_toggle", share: false });
+    host.send({ type: "ping" });
+    await host.waitFor((m) => m.type === "pong");
+    await advance(srv, clock, 10_000);
+    const before = guest.messages.filter((m) => m.type === "peer_rate").length;
+    await advance(srv, clock, 5_000);
+    const after = guest.messages.filter((m) => m.type === "peer_rate").length;
+    assert.equal(after, before, "relay stops after revoking");
+  } finally {
+    host.close();
+    guest.close();
+    await srv.close();
+  }
+});

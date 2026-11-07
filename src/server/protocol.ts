@@ -139,12 +139,7 @@ export type ServerMessage =
   | { type: "peer_rate"; label: string; rate: number }
   | { type: "peer_left"; label: string }
   | { type: "room_closed"; reason: string }
-  | {
-      type: "pair_summary";
-      band: "mostly" | "partly" | "different" | "none";
-      meanAlignment?: number;
-      freshSeconds: number;
-    };
+  | { type: "pair_summary"; band: "mostly" | "partly" | "different" | "none"; meanAlignment?: number; freshSeconds: number };
 
 // ---------------------------------------------------------------------------
 // Binary frame format (client -> server, camera pixels)
