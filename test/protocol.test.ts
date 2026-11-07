@@ -128,6 +128,54 @@ test("frames need a header, valid timestamp and pixels", () => {
 
 // -- TokenBucket --------------------------------------------------------------
 
+test("pair messages validate", () => {
+  const valid: Array<[unknown, string]> = [
+    [{ ...envelope, type: "create_room" }, "create_room"],
+    [{ ...envelope, type: "join_room", code: "AbC123", label: "Rin" }, "join_room"],
+    [{ ...envelope, type: "join_room", code: "abc123" }, "join_room"],
+    [{ ...envelope, type: "participant_ready", ready: true, label: "Jo" }, "participant_ready"],
+    [{ ...envelope, type: "participant_ready", ready: false }, "participant_ready"],
+    [{ ...envelope, type: "host_start", durationMin: 3 }, "host_start"],
+    [{ ...envelope, type: "share_rate_toggle", share: true }, "share_rate_toggle"],
+    [{ ...envelope, type: "leave_room" }, "leave_room"],
+  ];
+  for (const [raw, expected] of valid) {
+    const res = parseClientMessage(raw);
+    assert.ok(res.ok, `${JSON.stringify(raw)} should parse`);
+    assert.equal(res.message.type, expected);
+  }
+
+  const invalid: Array<[unknown, string]> = [
+    [{ ...envelope, type: "join_room" }, "invalid_field"],
+    [{ ...envelope, type: "join_room", code: 123 }, "invalid_field"],
+    [{ ...envelope, type: "participant_ready", ready: "yes" }, "invalid_field"],
+    [{ ...envelope, type: "host_start", durationMin: 4 }, "invalid_field"],
+    [{ ...envelope, type: "share_rate_toggle", share: "on" }, "invalid_field"],
+  ];
+  for (const [raw, expected] of invalid) {
+    const res = parseClientMessage(raw);
+    assert.ok(!res.ok, `${JSON.stringify(raw)} should be rejected`);
+    assert.equal(res.code, expected);
+  }
+});
+
+test("room codes use an unambiguous alphabet and labels sanitize", async () => {
+  const { generateRoomCode, sanitizeLabel, ROOM_CODE_ALPHABET } = await import(
+    "../src/server/protocol.js"
+  );
+  assert.ok(!ROOM_CODE_ALPHABET.includes("0"));
+  assert.ok(!ROOM_CODE_ALPHABET.includes("O"));
+  assert.ok(!ROOM_CODE_ALPHABET.includes("1"));
+  assert.ok(!ROOM_CODE_ALPHABET.includes("l"));
+  const codes = new Set(Array.from({ length: 200 }, () => generateRoomCode(6)));
+  assert.ok(codes.size > 190, "codes are effectively unique at this scale");
+  for (const c of codes) assert.match(c, /^[A-Z0-9]{6}$/);
+  assert.equal(sanitizeLabel("  Rin  "), "Rin");
+  assert.equal(sanitizeLabel(""), undefined);
+  assert.equal(sanitizeLabel("x".repeat(40))?.length, 24);
+  assert.equal(sanitizeLabel("a\u0007b"), "ab", "control chars stripped");
+});
+
 test("token bucket allows bursts then throttles to sustained rate", () => {
   const bucket = new TokenBucket(5, 10); // burst 5, sustained 10/s
   let t = 100;

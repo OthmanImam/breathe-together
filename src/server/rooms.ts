@@ -31,6 +31,8 @@ import { SdkSource } from "../signal/sdkSource.js";
 import { SupervisedSource } from "../signal/supervisor.js";
 import type { ParticipantPipelineEvent } from "./sessionPipeline.js";
 import { ParticipantPipeline } from "./sessionPipeline.js";
+import { generateRoomCode } from "./protocol.js";
+import { readUsageSeconds } from "../signal/sdkSource.js";
 
 export type SourceKind = "mock" | "sdk";
 
@@ -107,7 +109,8 @@ function randomRoomId(counter: number): string {
 }
 
 export type RoomEvent =
-  | { kind: "participant_added"; roomId: string; participantId: string };
+  | { kind: "participant_added"; roomId: string; participantId: string }
+  | { kind: "room_expired"; roomId: string; participantId: string };
 
 export type RoomEventListener = (e: RoomEvent) => void;
 
@@ -134,6 +137,11 @@ export class RoomManager {
       const i = this.roomListeners.indexOf(cb);
       if (i >= 0) this.roomListeners.splice(i, 1);
     };
+  }
+
+  /** Room events only (participant_added / room_expired). */
+  onPairEvent(cb: RoomEventListener): () => void {
+    return this.onRoomEvent(cb);
   }
 
   /* @internal */ emitRoomEvent(e: RoomEvent): void {
@@ -170,6 +178,82 @@ export class RoomManager {
   /** Drive every participant's session forward to `nowMs` (monotonic). */
   tickAll(nowMs: number): void {
     for (const room of this.rooms.values()) room.tick(nowMs);
+    this.sweepExpired(nowMs);
+  }
+
+  /** Pair rooms expire (unused, session never started) after the configured window. */
+  sweepExpired(nowMs: number): void {
+    const expiryMs = this.settings.pair.codeExpiryMinutes * 60_000;
+    for (const [id, room] of this.rooms) {
+      if (!room.isPair) continue;
+      if (room.sessionStarted) continue;
+      if (nowMs - room.createdAtMs > expiryMs) {
+        room.shutdown();
+        this.rooms.delete(id);
+        for (const cb of this.roomListeners) {
+          cb({ kind: "room_expired", roomId: id, participantId: "" });
+        }
+      }
+    }
+  }
+
+  /** Create a pair room with a fresh code; the creator becomes host. */
+  createPairRoom(): Room {
+    const pair = this.settings.pair;
+    let code = "";
+    for (let attempt = 0; attempt < 20; attempt++) {
+      code = generateRoomCode(pair.codeLength);
+      if (![...this.rooms.values()].some((r) => r.code === code)) break;
+    }
+    const room = new Room(`pair-${code.toLowerCase()}`, this, { pair: true, code });
+    this.rooms.set(room.id, room);
+    return room;
+  }
+
+  findPairRoomByCode(code: string): Room | undefined {
+    const wanted = `pair-${code.toLowerCase()}`;
+    return this.rooms.get(wanted);
+  }
+
+  /**
+   * Move a participant into a pair room, preserving consent/label/ready.
+   * Returns the assigned id on success, or an error message. The source
+   * room is cleaned up. Note: solo rooms all mint "p1"-style ids, so on
+   * collision the moved participant gets a FRESH id in the target room —
+   * callers must use the returned id, never the old one.
+   */
+  moveParticipant(
+    fromRoomId: string,
+    participantId: string,
+    target: Room,
+    label?: string,
+  ): { ok: true; participantId: string } | { ok: false; error: string } {
+    const from = this.rooms.get(fromRoomId);
+    const source = from?.getParticipant(participantId);
+    if (!from || !source) return { ok: false, error: "Not in a room." };
+    if (target.participants().size >= target.maxParticipants) {
+      return { ok: false, error: "That room is full." };
+    }
+    from.removeParticipant(participantId);
+    if (from.participants().size === 0) this.rooms.delete(from.id);
+    const addedId = target.addParticipant(
+      target.getParticipant(participantId) ? undefined : participantId,
+    );
+    const moved = target.getParticipant(addedId);
+    if (moved) {
+      moved.setConsent(source.consentGranted);
+      moved.ready = source.ready;
+      moved.label = label ?? source.label;
+      moved.shareRate = source.shareRate;
+    }
+    return { ok: true, participantId: addedId };
+  }
+
+  /** Remaining daily SDK budget in minutes (for pair quota display). */
+  quotaRemainingMin(): number {
+    const capSec = this.settings.sdk.dailyCapMinutes * 60;
+    const usedSec = readUsageSeconds(this.settings.sdk.usageFile);
+    return Math.max(0, Math.floor((capSec - usedSec) / 60));
   }
 
   removeParticipant(roomId: string, participantId: string): void {
@@ -202,13 +286,31 @@ export class RoomManager {
 
 export class Room {
   readonly id: string;
+  readonly isPair: boolean;
+  readonly code: string;
+  readonly createdAtMs: number;
   private readonly manager: RoomManager;
   private readonly byId = new Map<string, RoomParticipant>();
   private participantCounter = 0;
+  /** Set when a session starts; only unstarted pair rooms expire. */
+  sessionStarted = false;
+  /** Host participant id (pair rooms; first participant). */
+  hostId: string | undefined;
 
-  constructor(id: string, manager: RoomManager) {
+  constructor(
+    id: string,
+    manager: RoomManager,
+    opts?: { pair?: boolean; code?: string },
+  ) {
     this.id = id;
     this.manager = manager;
+    this.isPair = opts?.pair ?? false;
+    this.code = opts?.code ?? "";
+    this.createdAtMs = manager.internal.clock.now();
+  }
+
+  get maxParticipants(): number {
+    return this.isPair ? this.manager.internal.settings.pair.maxParticipants : 64;
   }
 
   participants(): Map<string, RoomParticipant> {
@@ -221,10 +323,15 @@ export class Room {
 
   /** Add (or idempotently return) a participant with its own pipeline. */
   addParticipant(wantedId?: string): string {
-    const id =
+    let id =
       wantedId && /^[A-Za-z0-9_-]{1,64}$/.test(wantedId)
         ? wantedId
-        : `p${++this.participantCounter}`;
+        : "";
+    if (!id) {
+      do {
+        id = `p${++this.participantCounter}`;
+      } while (this.byId.has(id));
+    }
     const existing = this.byId.get(id);
     if (existing) return id;
 
@@ -260,6 +367,7 @@ export class Room {
     });
     const p = new RoomParticipant(id, pipeline, this);
     this.byId.set(id, p);
+    if (this.isPair && !this.hostId) this.hostId = id;
     this.manager.emitRoomEvent({ kind: "participant_added", roomId: this.id, participantId: id });
     return id;
   }
@@ -269,6 +377,7 @@ export class Room {
     if (!p) return;
     p.pipeline.destroy();
     this.byId.delete(id);
+    if (this.hostId === id) this.hostId = undefined;
   }
 
   tick(nowMs: number): void {
@@ -286,6 +395,12 @@ export class RoomParticipant {
   readonly pipeline: ParticipantPipeline;
   private readonly room: Room;
   consentGranted = false;
+  /** Self-chosen display label (no accounts). Defaults to a neutral name. */
+  label = "Participant";
+  /** Lobby readiness (camera on, setup done). */
+  ready = false;
+  /** Opt-in: share my breathing rate with the other participant (off). */
+  shareRate = false;
   /** Remembered source kind (mock|sdk) — sessions start with it. */
   wantedSource: SourceKind = "mock";
   /** Dev-only scenario to use for the next session (validated at call time). */

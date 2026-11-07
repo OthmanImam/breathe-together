@@ -283,8 +283,7 @@ test("second participant gets a unique id in the same room (pair-mode shape)", (
   assert.equal(mgr.roomCount, 0);
 });
 
-test("source factory: sdk kind builds the real SDK source; mock kind builds the mock", () => {
-  const built = DEFAULT_SOURCE_FACTORY(
+test("source factory: sdk kind builds the real SDK source; mock kind builds the mock", () => {  const built = DEFAULT_SOURCE_FACTORY(
     { kind: "sdk" },
     { clock: new SimClock(), settings: FROZEN_DEFAULT_SETTINGS, seed: 7 },
   );
@@ -297,4 +296,65 @@ test("source factory: sdk kind builds the real SDK source; mock kind builds the 
   );
   assert.equal(mock.kind, "mock");
   assert.equal(mock.note, undefined);
+});
+
+test("pair rooms: create, move with consent preserved, host designation, full room", () => {
+  const clock = new SimClock();
+  const mgr = new RoomManager({ clock });
+
+  // Host starts in a solo auto-room, consents, then creates a pair room.
+  const hostJoin = mgr.join();
+  const host = mgr.getRoom(hostJoin.roomId)!.getParticipant(hostJoin.participantId)!;
+  host.setConsent(true);
+  const pair = mgr.createPairRoom();
+  assert.equal(pair.isPair, true);
+  assert.match(pair.code, /^[A-Z0-9]{6}$/);
+  const moved = mgr.moveParticipant(hostJoin.roomId, hostJoin.participantId, pair, "Host");
+  assert.equal(moved.ok, true);
+  if (!moved.ok) throw new Error("move failed");
+  const hostInPair = pair.getParticipant(moved.participantId)!;
+  assert.equal(hostInPair.consentGranted, true, "consent preserved across the move");
+  assert.equal(hostInPair.label, "Host");
+  assert.equal(pair.hostId, hostJoin.participantId, "creator is host");
+  assert.equal(mgr.getRoom(hostJoin.roomId), undefined, "empty solo room vanished");
+
+  // Joiner moves in; room fills at 2.
+  const guestJoin = mgr.join();
+  const guest = mgr.getRoom(guestJoin.roomId)!.getParticipant(guestJoin.participantId)!;
+  guest.setConsent(true);
+  const moved2 = mgr.moveParticipant(guestJoin.roomId, guestJoin.participantId, pair, "Guest");
+  assert.equal(moved2.ok, true);
+  if (!moved2.ok) throw new Error("move2 failed");
+  assert.notEqual(moved2.participantId, guestJoin.participantId, "colliding id gets a fresh one");
+  assert.equal(pair.participants().size, 2);
+  assert.equal(pair.getParticipant(moved2.participantId)!.label, "Guest");
+
+  // A third participant cannot be moved in.
+  const third = mgr.join();
+  const moved3 = mgr.moveParticipant(third.roomId, third.participantId, pair, "Third");
+  assert.equal(moved3.ok, false);
+  if (!moved3.ok) assert.equal(moved3.error, "That room is full.");
+});
+
+test("pair rooms expire when unused (never started)", () => {
+  const clock = new SimClock();
+  const mgr = new RoomManager({ clock });
+  const pair = mgr.createPairRoom();
+  mgr.join({ wantedRoomId: pair.id }); // someone sits in it, unstarted
+  const expiryMs = mgr.internal.settings.pair.codeExpiryMinutes * 60_000;
+  clock.advance(expiryMs + 1);
+  mgr.tickAll(clock.now());
+  assert.equal(mgr.getRoom(pair.id), undefined, "expired room swept");
+});
+
+test("started pair rooms do not expire", () => {
+  const clock = new SimClock();
+  const mgr = new RoomManager({ clock });
+  const pair = mgr.createPairRoom();
+  mgr.join({ wantedRoomId: pair.id });
+  pair.sessionStarted = true;
+  const expiryMs = mgr.internal.settings.pair.codeExpiryMinutes * 60_000;
+  clock.advance(expiryMs + 1);
+  mgr.tickAll(clock.now());
+  assert.ok(mgr.getRoom(pair.id), "started rooms survive past the code expiry");
 });

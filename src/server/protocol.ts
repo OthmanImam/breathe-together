@@ -65,6 +65,18 @@ export type ClientMessage =
   /** Begin streaming normalized samples only (no coach): Setup-screen framing guidance. */
   | { type: "preview_start" }
   | { type: "preview_stop" }
+  /** Pair mode: create a room and become its host. */
+  | { type: "create_room" }
+  /** Pair mode: join a room by code (solo auto-room is left). */
+  | { type: "join_room"; code: string; label?: string }
+  /** Pair mode: readiness + display label for the lobby. */
+  | { type: "participant_ready"; ready: boolean; label?: string }
+  /** Pair mode, host only: start the pair session for the whole room. */
+  | { type: "host_start"; durationMin: SessionMinutes }
+  /** Pair mode: opt in/out of sharing my breathing rate with my partner. */
+  | { type: "share_rate_toggle"; share: boolean }
+  /** Pair mode: leave the current room (session ends for this side). */
+  | { type: "leave_room" }
   /** Dev-only: choose which mock scenario the NEXT session uses. Server refuses in production. */
   | { type: "set_scenario"; scenario: string }
   | { type: "ping" };
@@ -106,7 +118,27 @@ export type ServerMessage =
       lines: string[];
     }
   | { type: "pong" }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string }
+  | { type: "room_created"; code: string }
+  | {
+      type: "room_state";
+      code?: string;
+      hostId: string;
+      phase: "lobby" | "session";
+      participants: Array<{
+        id: string;
+        label: string;
+        ready: boolean;
+        consent: boolean;
+      }>;
+      /** Remaining daily SDK budget in minutes (pair quota display). */
+      quotaRemainingMin?: number;
+    }
+  | { type: "alignment_update"; value?: number; stale: boolean; waiting: boolean }
+  | { type: "peer_status"; kind: "joined" | "left" | "signal-ok" | "signal-lost"; label: string }
+  | { type: "peer_rate"; label: string; rate: number }
+  | { type: "peer_left"; label: string }
+  | { type: "room_closed"; reason: string };
 
 // ---------------------------------------------------------------------------
 // Binary frame format (client -> server, camera pixels)
@@ -182,6 +214,10 @@ export interface ParseFailure {
 const ID_PATTERN = /^[\w-]{1,64}$/;
 /** Longest acceptable free-text field (clientVersion etc.). */
 const MAX_STRING_FIELD = 128;
+/** Room codes: unambiguous alphabet (no 0/O, 1/l/I), 6 chars (config-driven at mint time). */
+export const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+/** Display labels: plain, short, self-chosen. Sanitized server-side. */
+export const MAX_LABEL_LENGTH = 24;
 
 export const CLIENT_ERROR_CODES = {
   bad_json: "malformed_json",
@@ -225,6 +261,29 @@ function checkString(v: unknown, name: string, max = MAX_STRING_FIELD): ParseFai
  * Validate one JSON-parsed client message. Dev-only affordances are gated by
  * message type/flags, not here; the base protocol stays identical either way.
  */
+export function generateRoomCode(length: number): string {
+  const bytes = new Uint8Array(length);
+  (globalThis.crypto ?? { getRandomValues: (b: Uint8Array) => b }).getRandomValues?.(bytes);
+  // crypto.getRandomValues availability: Node >= 20 and browsers both have
+  // it; fall back to Math.random only if somehow absent.
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    const r = bytes[i] ?? Math.floor(Math.random() * 256);
+    out += ROOM_CODE_ALPHABET[r % ROOM_CODE_ALPHABET.length];
+  }
+  return out;
+}
+
+export function sanitizeLabel(label: unknown): string | undefined {
+  if (typeof label !== "string") return undefined;
+  const cleaned = label
+    // eslint-disable-next-line no-control-regex -- stripping control chars from user labels
+    .replaceAll(/[\u0000-\u001F\u007F]/g, "")
+    .trim()
+    .slice(0, MAX_LABEL_LENGTH);
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
 export function parseClientMessage(parsed: unknown): ParsedClientMessage | ParseFailure {
   if (!isRecord(parsed)) return fail("malformed", "message must be a JSON object");
   if (typeof parsed.type !== "string") return fail("malformed", "missing type");
@@ -277,6 +336,49 @@ export function parseClientMessage(parsed: unknown): ParsedClientMessage | Parse
       return { ok: true, message: { type: "preview_start" } };
     case "preview_stop":
       return { ok: true, message: { type: "preview_stop" } };
+    case "create_room":
+      return { ok: true, message: { type: "create_room" } };
+    case "join_room": {
+      if (typeof parsed.code !== "string" || parsed.code.length < 1 || parsed.code.length > 16) {
+        return fail("invalid_field", "code must be a short room code string");
+      }
+      const label = sanitizeLabel(parsed.label);
+      if (parsed.label !== undefined && label === undefined) {
+        return fail("invalid_field", "label must be a short string");
+      }
+      return {
+        ok: true,
+        message: { type: "join_room", code: parsed.code.toUpperCase(), ...(label ? { label } : {}) },
+      };
+    }
+    case "participant_ready": {
+      if (typeof parsed.ready !== "boolean") {
+        return fail("invalid_field", "ready must be a boolean");
+      }
+      const label = sanitizeLabel(parsed.label);
+      if (parsed.label !== undefined && label === undefined) {
+        return fail("invalid_field", "label must be a short string");
+      }
+      return {
+        ok: true,
+        message: { type: "participant_ready", ready: parsed.ready, ...(label ? { label } : {}) },
+      };
+    }
+    case "host_start": {
+      const d = parsed.durationMin;
+      if (typeof d !== "number" || !SESSION_DURATIONS.includes(d as SessionMinutes)) {
+        return fail("invalid_field", "durationMin must be one of 3, 5, 10");
+      }
+      return { ok: true, message: { type: "host_start", durationMin: d as SessionMinutes } };
+    }
+    case "share_rate_toggle": {
+      if (typeof parsed.share !== "boolean") {
+        return fail("invalid_field", "share must be a boolean");
+      }
+      return { ok: true, message: { type: "share_rate_toggle", share: parsed.share } };
+    }
+    case "leave_room":
+      return { ok: true, message: { type: "leave_room" } };
     case "set_scenario": {
       if (parsed.scenario === undefined) {
         return fail("invalid_field", "scenario is required");

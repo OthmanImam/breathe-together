@@ -139,6 +139,41 @@ export interface MockSettings {
   badLightConfidence: number;
 }
 
+export interface PairSettings {
+  /**
+   * UNVALIDATED: all alignment constants below are derived from the
+   * documented 30 s reporting window and solo tuning; no real-face data
+   * (docs/REAL_FACE_RESULTS.md) exists yet to validate them. See
+   * docs/PAIR_DESIGN.md §3c.
+   */
+  /** Rate gap (bpm) at which rateAgreement falls to 0. UNVALIDATED. */
+  maxRateGapBpm: number;
+  /** Gap (bpm) at which guideFollowing falls to 0. UNVALIDATED. */
+  maxGuideGapBpm: number;
+  /** Weights for alignmentRaw = w1*rateAgreement + w2*guideFollowing. UNVALIDATED. */
+  wRateAgreement: number;
+  wGuideFollowing: number;
+  /** Smoothing time constant (s); must stay >= lead.averagingWindowSeconds. UNVALIDATED. */
+  emaTauSeconds: number;
+  /** Displayed value moves only when the EMA differs by at least this. UNVALIDATED. */
+  hysteresisBand: number;
+  /** Below this confidence (either participant), alignment FREEZES. */
+  freezeConfidence: number;
+  /** Frozen this long (s) before showing a neutral "waiting" state. UNVALIDATED. */
+  staleResetSeconds: number;
+  /** Uncalibrated participants join the max at the fallback after this. UNVALIDATED. */
+  maxCalibrateWaitSeconds: number;
+  /** Pair session length: default and maximum (minutes). */
+  defaultDurationMin: number;
+  maxDurationMin: number;
+  /** Room code: length (chars), expiry (minutes), max participants. */
+  codeLength: number;
+  codeExpiryMinutes: number;
+  maxParticipants: number;
+  /** Alignment at/above which the visual "grow" element accumulates. UNVALIDATED. */
+  growThreshold: number;
+}
+
 export interface SdkSettings {
   /** Capture frame width the browser sends (px). Must match the client's downscale. */
   frameWidth: number;
@@ -188,6 +223,7 @@ export interface Settings {
   session: SessionSettings;
   mock: MockSettings;
   sdk: SdkSettings;
+  pair: PairSettings;
   server: ServerSettings;
 }
 
@@ -267,6 +303,23 @@ export const DEFAULT_SETTINGS: Settings = {
     dailyCapMinutes: 60,
     usageFile: ".bt-usage.json",
   },
+  pair: {
+    maxRateGapBpm: 6,
+    maxGuideGapBpm: 6,
+    wRateAgreement: 0.5,
+    wGuideFollowing: 0.5,
+    emaTauSeconds: 30,
+    hysteresisBand: 0.05,
+    freezeConfidence: 0.5,
+    staleResetSeconds: 30,
+    maxCalibrateWaitSeconds: 90,
+    defaultDurationMin: 3,
+    maxDurationMin: 5,
+    codeLength: 6,
+    codeExpiryMinutes: 15,
+    maxParticipants: 2,
+    growThreshold: 0.6,
+  },
   server: {
     port: 3000,
     // 10 Hz pacer push: the client interpolates between updates with rAF, so
@@ -319,6 +372,7 @@ export function patchSettings(base: Settings, patch: PartialSettings): Settings 
     session: { ...base.session, ...patch.session },
     mock: { ...base.mock, ...patch.mock },
     sdk: { ...base.sdk, ...patch.sdk },
+    pair: { ...base.pair, ...patch.pair },
     server: { ...base.server, ...patch.server },
   };
 }

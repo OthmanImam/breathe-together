@@ -126,6 +126,24 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       socket.destroy();
       return;
     }
+    // Cross-site WebSocket hijacking guard: a browser Origin must match the
+    // Host it dialed. Missing Origin (non-browser clients, tests) is allowed.
+    const originHeader = req.headers.origin;
+    if (originHeader) {
+      try {
+        const originHost = new URL(originHeader).hostname;
+        const hostHost = (req.headers.host ?? "").split(":")[0] ?? "";
+        if (originHost !== hostHost) {
+          socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+      } catch {
+        socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });
@@ -145,12 +163,91 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     if (p) attachPipeline(p);
   });
 
+  // Last abstract signal status sent to a room per participant (transition-only).
+  const lastPeerStatus = new Map<string, string>();
+
+  // Rooms that expire unused: tell anyone still waiting in them.
+  manager.onRoomEvent((e) => {
+    if (e.kind !== "room_expired") return;
+    for (const c of connsInRoom(e.roomId)) {
+      send(c, {
+        type: "room_closed",
+        reason: "The room expired before anyone started. Create a new room to try again.",
+      });
+      c.room = undefined;
+      c.participantId = undefined;
+    }
+  });
+
+  /**
+   * Leave a room. Host leaving a pair room closes it for everyone (all
+   * pipelines stop); a joiner leaving just ends their side and the host is
+   * told calmly. Solo "rooms" are cleaned like a disconnect.
+   */
+  function leaveRoom(conn: ConnState, participant: RoomParticipant | undefined): void {
+    const roomId = conn.room;
+    const pid = conn.participantId;
+    if (!roomId || !pid) return;
+    const room = manager.getRoom(roomId);
+    const isHost = room?.hostId === pid;
+    const label = participant?.label ?? "Participant";
+    conn.room = undefined;
+    conn.participantId = undefined;
+    conn.consentGranted = false;
+    if (room?.isPair) {
+      if (isHost) {
+        for (const c of connsInRoom(roomId)) {
+          send(c, {
+            type: "room_closed",
+            reason: "The host left, so the room closed. Cameras are off.",
+          });
+        }
+      } else {
+        broadcastToRoom(roomId, { type: "peer_left", label }, undefined);
+      }
+      // Remove everyone (destroys pipelines, stops sources, releases cameras).
+      for (const id of [...room.participants().keys()]) {
+        manager.removeParticipant(roomId, id);
+      }
+      for (const c of connsInRoom(roomId)) {
+        c.room = undefined;
+        c.participantId = undefined;
+      }
+      return;
+    }
+    manager.removeParticipant(roomId, pid);
+  }
+
   function attachPipeline(p: RoomParticipant): void {
     p.pipeline.onEvent((ev: ParticipantPipelineEvent) => {
       const conn = findConn(p.roomId, p.id);
       if (!conn) return; // participant with no live socket: drop quietly
       if (ev.type === "sample") {
         sendSample(conn, ev.sample);
+        // Privacy relay: the partner sees this participant's rate ONLY when
+        // they opted in (shareRate defaults off, revocable anytime).
+        if (p.shareRate && ev.sample.breathingRate !== undefined) {
+          broadcastToRoom(
+            p.roomId,
+            {
+              type: "peer_rate",
+              label: p.label,
+              rate: Math.round(ev.sample.breathingRate * 10) / 10,
+            },
+            p.id,
+          );
+        }
+        // Abstract peer signal health, on transitions only.
+        const key = `${p.roomId}/${p.id}`;
+        const statusKey = ev.sample.status === "ok" ? "signal-ok" : ev.sample.status === "lost" ? "signal-lost" : "";
+        if (statusKey !== "" && lastPeerStatus.get(key) !== statusKey) {
+          lastPeerStatus.set(key, statusKey);
+          broadcastToRoom(
+            p.roomId,
+            { type: "peer_status", kind: statusKey as "signal-ok" | "signal-lost", label: p.label },
+            p.id,
+          );
+        }
       } else if (ev.type === "pacer_update") {
         send(conn, {
           type: "pacer_update",
@@ -211,6 +308,40 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     return undefined;
   }
 
+  function connsInRoom(roomId: string, exceptId?: string): ConnState[] {
+    return [...connections].filter(
+      (c) => c.room === roomId && c.participantId !== exceptId,
+    );
+  }
+
+  /** Broadcast the lobby/session shape to everyone in a room. */
+  function broadcastRoomState(roomId: string): void {
+    const room = manager.getRoom(roomId);
+    if (!room) return;
+    const participants = [...room.participants().values()].map((p) => ({
+      id: p.id,
+      label: p.label,
+      ready: p.ready,
+      consent: p.consentGranted,
+    }));
+    const anyActive = participants.some((p) =>
+      room.getParticipant(p.id)?.pipeline.isSessionActive,
+    );
+    const msg: ServerMessage = {
+      type: "room_state",
+      ...(room.isPair ? { code: room.code } : {}),
+      hostId: room.hostId ?? participants[0]?.id ?? "",
+      phase: anyActive ? "session" : "lobby",
+      participants,
+      ...(room.isPair ? { quotaRemainingMin: manager.quotaRemainingMin() } : {}),
+    };
+    for (const c of connsInRoom(roomId)) send(c, msg);
+  }
+
+  function broadcastToRoom(roomId: string, msg: ServerMessage, exceptId?: string): void {
+    for (const c of connsInRoom(roomId, exceptId)) send(c, msg);
+  }
+
   function sendSample(conn: ConnState, s: NormalizedSample): void {
     send(conn, {
       type: "sample",
@@ -251,12 +382,12 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
 
     socket.on("close", () => {
       if (conn.room && conn.participantId) {
-        manager.removeParticipant(conn.room, conn.participantId);
-        log({
-          event: "disconnected",
-          roomId: conn.room,
-          participantId: conn.participantId,
-        });
+        const roomId = conn.room;
+        const participantId = conn.participantId;
+        const gone = manager.getRoom(roomId)?.getParticipant(participantId);
+        // One path: solo cleanup, joiner peer_left, host-closes-room.
+        leaveRoom(conn, gone);
+        log({ event: "disconnected", roomId, participantId });
       }
       connections.delete(conn);
     });
@@ -338,6 +469,7 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
       case "consent_granted": {
         participant?.setConsent(true);
         conn.consentGranted = true;
+        if (conn.room) broadcastRoomState(conn.room);
         break;
       }
 
@@ -345,6 +477,14 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
         conn.consentGranted = false;
         participant?.setConsent(false);
         participant?.stopSession();
+        if (conn.room && participant) {
+          broadcastToRoom(
+            conn.room,
+            { type: "peer_status", kind: "signal-lost", label: participant.label },
+            participant.id,
+          );
+        }
+        if (conn.room) broadcastRoomState(conn.room);
         send(conn, {
           type: "notice",
           t: now,
@@ -419,6 +559,160 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
 
       case "preview_stop": {
         participant?.stopPreview();
+        break;
+      }
+
+      case "create_room": {
+        if (!conn.room || !conn.participantId) return;
+        const room = manager.createPairRoom();
+        const moved = manager.moveParticipant(conn.room, conn.participantId, room);
+        if (!moved.ok) {
+          send(conn, { type: "error", code: "move_failed", message: moved.error });
+          break;
+        }
+        conn.room = room.id;
+        conn.participantId = moved.participantId;
+        send(conn, { type: "room_created", code: room.code });
+        broadcastRoomState(room.id);
+        break;
+      }
+
+      case "join_room": {
+        if (!conn.room || !conn.participantId) return;
+        const target = manager.findPairRoomByCode(msg.code);
+        if (!target) {
+          send(conn, {
+            type: "error",
+            code: "room_not_found",
+            message: "That room code wasn't found. Check the code and try again.",
+          });
+          break;
+        }
+        const clock = manager.internal.clock;
+        const expiryMs = settings.pair.codeExpiryMinutes * 60_000;
+        if (!target.sessionStarted && clock.now() - target.createdAtMs > expiryMs) {
+          send(conn, {
+            type: "error",
+            code: "room_expired",
+            message: "That room has expired. Ask your partner to create a new one.",
+          });
+          break;
+        }
+        if (target.participants().size >= target.maxParticipants) {
+          send(conn, {
+            type: "error",
+            code: "room_full",
+            message: "That room is full (2 people).",
+          });
+          break;
+        }
+        const moved = manager.moveParticipant(
+          conn.room,
+          conn.participantId,
+          target,
+          msg.label,
+        );
+        if (!moved.ok) {
+          send(conn, { type: "error", code: "move_failed", message: moved.error });
+          break;
+        }
+        conn.room = target.id;
+        conn.participantId = moved.participantId;
+        broadcastToRoom(
+          target.id,
+          { type: "peer_status", kind: "joined", label: msg.label ?? "Participant" },
+          conn.participantId,
+        );
+        broadcastRoomState(target.id);
+        break;
+      }
+
+      case "participant_ready": {
+        if (!participant) return;
+        participant.ready = msg.ready;
+        if (msg.label) participant.label = msg.label;
+        if (conn.room) broadcastRoomState(conn.room);
+        break;
+      }
+
+      case "share_rate_toggle": {
+        if (!participant) return;
+        participant.shareRate = msg.share;
+        break;
+      }
+
+      case "leave_room": {
+        if (!conn.room || !conn.participantId) break;
+        leaveRoom(conn, participant);
+        break;
+      }
+
+      case "host_start": {
+        if (!participant || !conn.room) return;
+        const room = manager.getRoom(conn.room);
+        if (!room?.isPair) {
+          send(conn, { type: "error", code: "not_pair_room", message: "Pair rooms only." });
+          break;
+        }
+        if (room.hostId !== conn.participantId) {
+          send(conn, {
+            type: "error",
+            code: "not_host",
+            message: "Only the host can start the session.",
+          });
+          break;
+        }
+        if (room.participants().size < 2) {
+          send(conn, {
+            type: "error",
+            code: "waiting_for_partner",
+            message: "Waiting for your partner to join.",
+          });
+          break;
+        }
+        if (msg.durationMin > settings.pair.maxDurationMin) {
+          send(conn, {
+            type: "error",
+            code: "duration_too_long",
+            message: `Pair sessions run up to ${settings.pair.maxDurationMin} minutes.`,
+          });
+          break;
+        }
+        // Quota: pair sessions consume twice the wall clock. Refuse a start
+        // that would exceed the daily budget mid-session.
+        if (signalSource === "sdk") {
+          const remainingMin = manager.quotaRemainingMin();
+          if (remainingMin < 2 * msg.durationMin) {
+            send(conn, {
+              type: "error",
+              code: "quota_insufficient",
+              message: `Not enough daily measurement time left for a pair session (${remainingMin} minutes remaining). The guide can still run without sensing.`,
+            });
+            break;
+          }
+        }
+        const everyone = [...room.participants().values()];
+        const unready = everyone.filter((p) => !p.consentGranted || !p.ready);
+        if (unready.length > 0) {
+          send(conn, {
+            type: "error",
+            code: "not_all_ready",
+            message: "Everyone needs to agree and be ready first.",
+          });
+          break;
+        }
+        for (const p of everyone) {
+          const started = p.startSession(msg.durationMin);
+          if (!started.ok) {
+            send(conn, {
+              type: "error",
+              code: "start_refused",
+              message: `Could not start for ${p.label}: ${started.error}`,
+            });
+          }
+        }
+        room.sessionStarted = true;
+        broadcastRoomState(room.id);
         break;
       }
 

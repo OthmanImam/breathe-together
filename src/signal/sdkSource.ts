@@ -205,14 +205,24 @@ export class SdkSource implements SignalSource {
   }
 
   private readUsage(): UsageRecord {
-    const today = new Date().toISOString().slice(0, 10);
-    try {
-      const raw = readFileSync(this.cfg.usageFile, "utf8");
-      const parsed = JSON.parse(raw) as UsageRecord;
-      if (parsed.date === today && typeof parsed.seconds === "number") return parsed;
-    } catch {
-      // No file / unreadable / corrupt: start fresh.
-    }
-    return { date: today, seconds: 0 };
+    return readUsageRecord(this.cfg.usageFile);
   }
+}
+
+/** Total seconds consumed today (all sources share one file). Exported for quota math. */
+export function readUsageSeconds(usageFile: string): number {
+  return readUsageRecord(usageFile).seconds;
+}
+
+/** Read today's usage record (fresh when the file is missing/stale/corrupt). */
+export function readUsageRecord(usageFile: string): UsageRecord {
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const raw = readFileSync(usageFile, "utf8");
+    const parsed = JSON.parse(raw) as UsageRecord;
+    if (parsed.date === today && typeof parsed.seconds === "number") return parsed;
+  } catch {
+    // No file / unreadable / corrupt: start fresh.
+  }
+  return { date: today, seconds: 0 };
 }
