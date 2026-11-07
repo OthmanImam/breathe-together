@@ -152,6 +152,13 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
 
   // -- websocket handling --------------------------------------------------
   const connections = new Set<ConnState>();
+  // Feeds per pair room (creation order), so leaveRoom can drop a leaver's
+  // proposal from the shared pacer (solo continuation). Populated at
+  // host_start; leaveRoom reads it safely (undefined before any start).
+  const pairFeeds = new Map<
+    string,
+    Array<{ pipeline: RoomParticipant["pipeline"]; remove(): void }>
+  >();
 
   const send = (conn: ConnState, msg: ServerMessage): void =>
     wsSend(conn.socket, msg);
@@ -196,6 +203,13 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
     conn.participantId = undefined;
     conn.consentGranted = false;
     if (room?.isPair) {
+      // A side is leaving: their proposal drops out of the shared rate and
+      // alignment freezes (their latest sample goes stale naturally).
+      const feeds = pairFeeds.get(roomId);
+      const leaverPipeline = participant?.pipeline;
+      for (const entry of feeds ?? []) {
+        if (entry.pipeline === leaverPipeline) entry.remove();
+      }
       if (isHost) {
         for (const c of connsInRoom(roomId)) {
           send(c, {
@@ -723,14 +737,32 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
           room.roomCoach = coach;
           for (const p of everyone) p.pipeline.setSharedPacer(coach.pacer);
           coach.onEvent((ev) => {
-            const st = ev.state;
-            broadcastToRoom(room.id, {
-              type: "alignment_update",
-              ...(st.value !== undefined ? { value: st.value } : {}),
-              stale: st.stale,
-              waiting: st.waiting,
-            });
+            if (ev.type === "alignment_update") {
+              const st = ev.state;
+              broadcastToRoom(room.id, {
+                type: "alignment_update",
+                ...(st.value !== undefined ? { value: st.value } : {}),
+                stale: st.stale,
+                waiting: st.waiting,
+              });
+            } else if (ev.type === "pair_ended") {
+              broadcastToRoom(room.id, {
+                type: "pair_summary",
+                band: ev.band,
+                freshSeconds: ev.freshSeconds,
+                ...(ev.meanAlignment !== undefined
+                  ? { meanAlignment: ev.meanAlignment }
+                  : {}),
+              });
+            }
           });
+          pairFeeds.set(
+            room.id,
+            feeds.map((feed, i) => ({
+              pipeline: everyone[i]!.pipeline,
+              remove: () => coach.removeFeed(feed),
+            })),
+          );
         }
         room.sessionStarted = true;
         broadcastRoomState(room.id);

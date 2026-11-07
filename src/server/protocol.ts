@@ -138,7 +138,13 @@ export type ServerMessage =
   | { type: "peer_status"; kind: "joined" | "left" | "signal-ok" | "signal-lost"; label: string }
   | { type: "peer_rate"; label: string; rate: number }
   | { type: "peer_left"; label: string }
-  | { type: "room_closed"; reason: string };
+  | { type: "room_closed"; reason: string }
+  | {
+      type: "pair_summary";
+      band: "mostly" | "partly" | "different" | "none";
+      meanAlignment?: number;
+      freshSeconds: number;
+    };
 
 // ---------------------------------------------------------------------------
 // Binary frame format (client -> server, camera pixels)

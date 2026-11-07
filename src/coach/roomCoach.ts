@@ -44,6 +44,14 @@ export interface RoomCoachEvent {
   state: AlignmentState;
 }
 
+export interface PairEndedEvent {
+  type: "pair_ended";
+  t: number;
+  band: "mostly" | "partly" | "different" | "none";
+  meanAlignment?: number;
+  freshSeconds: number;
+}
+
 export interface RoomSnapshot {
   t: number;
   sharedRate: number;
@@ -67,13 +75,14 @@ export class RoomCoach {
   private readonly feeds: Array<RoomCoachFeed & { active: boolean }>;
   private readonly sharedPacer: Pacer;
   private readonly tracker: AlignmentTracker;
-  private readonly listeners: ((e: RoomCoachEvent) => void)[] = [];
+  private listeners: ((e: RoomCoachEvent | PairEndedEvent) => void)[] = [];
   private readonly latest: Array<
     | { breathingRate?: number; status: SignalStatus; confidence: number }
     | undefined
   > = [undefined, undefined];
   private readonly startT: number;
   private alignment: AlignmentState = { value: undefined, stale: true, waiting: true };
+  private pairEndedEmitted = false;
 
   constructor(deps: {
     clock: Clock;
@@ -96,7 +105,7 @@ export class RoomCoach {
     });
   }
 
-  onEvent(cb: (e: RoomCoachEvent) => void): () => void {
+  onEvent(cb: (e: RoomCoachEvent | PairEndedEvent) => void): () => void {
     this.listeners.push(cb);
     return () => {
       const i = this.listeners.indexOf(cb);
@@ -150,6 +159,23 @@ export class RoomCoach {
     for (const cb of this.listeners) {
       cb({ type: "alignment_update", t: nowMs, state: this.alignment });
     }
+    if (
+      !this.pairEndedEmitted &&
+      this.feeds.some((f) => f.active) &&
+      this.feeds.every((f) => !f.active || f.sessionEnded())
+    ) {
+      this.pairEndedEmitted = true;
+      const stats = this.pairSummaryStats();
+      for (const cb of this.listeners) {
+        cb({
+          type: "pair_ended",
+          t: nowMs,
+          band: this.alignmentBand(stats.meanAlignment),
+          meanAlignment: stats.meanAlignment,
+          freshSeconds: stats.freshSeconds,
+        });
+      }
+    }
     return {
       t: nowMs,
       sharedRate,
@@ -172,6 +198,15 @@ export class RoomCoach {
     const spanMs =
       this.freshHistory[this.freshHistory.length - 1]!.t - this.freshHistory[0]!.t;
     return { meanAlignment: mean, freshSeconds: Math.round(spanMs / 1000) };
+  }
+
+  /** Plain-language band for the mean alignment (UNVALIDATED thresholds). */
+  alignmentBand(mean: number | undefined): "mostly" | "partly" | "different" | "none" {
+    if (mean === undefined) return "none";
+    const { bandMostly, bandPartly } = this.settings.pair;
+    if (mean >= bandMostly) return "mostly";
+    if (mean >= bandPartly) return "partly";
+    return "different";
   }
 
   /** Latest alignment (for summaries / room state). */

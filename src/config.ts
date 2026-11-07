@@ -172,6 +172,9 @@ export interface PairSettings {
   maxParticipants: number;
   /** Alignment at/above which the visual "grow" element accumulates. UNVALIDATED. */
   growThreshold: number;
+  /** Summary band thresholds on mean alignment: >=mostly "mostly similar", >=partly "partly similar", else "different". UNVALIDATED. */
+  bandMostly: number;
+  bandPartly: number;
 }
 
 export interface SdkSettings {
@@ -319,6 +322,8 @@ export const DEFAULT_SETTINGS: Settings = {
     codeExpiryMinutes: 15,
     maxParticipants: 2,
     growThreshold: 0.6,
+    bandMostly: 0.8,
+    bandPartly: 0.45,
   },
   server: {
     port: 3000,
