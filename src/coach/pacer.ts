@@ -49,7 +49,12 @@ export class Pacer {
   setRate(breathsPerMin: number, _atMs = 0): this {
     void _atMs;
     const r = clampRate(breathsPerMin, this.cfg);
-    if (r !== this.rate) this.nextRate = r;
+    if (r === this.rate) {
+      // Re-requesting the committed rate cancels any pending change.
+      this.nextRate = undefined;
+    } else if (r !== this.nextRate) {
+      this.nextRate = r;
+    }
     return this;
   }
 

@@ -296,6 +296,8 @@ export class Room {
   sessionStarted = false;
   /** Host participant id (pair rooms; first participant). */
   hostId: string | undefined;
+  /** Pair coordinator (set when a pair session is running). */
+  roomCoach: import("../coach/roomCoach.js").RoomCoach | undefined;
 
   constructor(
     id: string,
@@ -382,11 +384,13 @@ export class Room {
 
   tick(nowMs: number): void {
     for (const p of this.byId.values()) p.pipeline.tick(nowMs);
+    this.roomCoach?.tick(nowMs);
   }
 
   shutdown(): void {
     for (const p of this.byId.values()) p.pipeline.destroy();
     this.byId.clear();
+    this.roomCoach = undefined;
   }
 }
 

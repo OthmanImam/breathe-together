@@ -29,6 +29,7 @@ import {
   type ServerMessage,
 } from "./protocol.js";
 import { RoomManager, type RoomParticipant, type SourceKind } from "./rooms.js";
+import { RoomCoach, pipelineFeed } from "../coach/roomCoach.js";
 import type { ParticipantPipelineEvent } from "./sessionPipeline.js";
 
 /** Monotonic wall clock for production use. */
@@ -710,6 +711,26 @@ export async function startServer(opts: ServerOptions = {}): Promise<RunningServ
               message: `Could not start for ${p.label}: ${started.error}`,
             });
           }
+        }
+        // Pair coordinator: one shared pacer over both pipelines' proposals.
+        if (everyone.length >= 2) {
+          const feeds = everyone.map((p) => pipelineFeed(p.pipeline));
+          const coach = new RoomCoach({
+            clock: manager.internal.clock,
+            settings: settings,
+            feeds: [feeds[0]!, feeds[1]!],
+          });
+          room.roomCoach = coach;
+          for (const p of everyone) p.pipeline.setSharedPacer(coach.pacer);
+          coach.onEvent((ev) => {
+            const st = ev.state;
+            broadcastToRoom(room.id, {
+              type: "alignment_update",
+              ...(st.value !== undefined ? { value: st.value } : {}),
+              stale: st.stale,
+              waiting: st.waiting,
+            });
+          });
         }
         room.sessionStarted = true;
         broadcastRoomState(room.id);

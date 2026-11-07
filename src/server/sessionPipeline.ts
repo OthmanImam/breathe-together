@@ -208,6 +208,22 @@ export class ParticipantPipeline {
     return this.pacer?.currentRate() ?? this.baseSettings.pacer.initialRate;
   }
 
+  /** The coach's own pace proposal (what pair coordination takes the max over). */
+  get coachProposal(): number {
+    return this.coach?.pacerRate ?? this.baseSettings.pacer.initialRate;
+  }
+
+  /**
+   * Pair mode: render the room's SHARED pacer instead of the local one, so
+   * every screen shows the same inhale/exhale moment. The local pacer still
+   * advances privately; only the emitted snapshots change.
+   */
+  setSharedPacer(pacer: Pacer | undefined): void {
+    this.sharedPacer = pacer;
+  }
+
+  private sharedPacer: Pacer | undefined;
+
   /** Begin a session; returns which source actually started (with any fallback note). */
   startSession(
     durationMin: SessionMinutes,
@@ -263,8 +279,7 @@ export class ParticipantPipeline {
       this.previewSource?.tick?.(nowMs);
       return;
     }
-    if (!this.active) return;
-    this.sampleSeenThisTick = false;
+    if (!this.active) return;    this.sampleSeenThisTick = false;
     this.source?.tick?.(nowMs);
     if (this.sampleSeenThisTick) {
       this.lastSignalActivityT = nowMs;
@@ -283,7 +298,7 @@ export class ParticipantPipeline {
     // Phase timers advance on ticks too, so guide-only sessions (no samples
     // at all) still move through their phases and end on time.
     this.coach?.tick(nowMs);
-    const snap = this.pacer!.advance(nowMs);
+    const snap = (this.sharedPacer ?? this.pacer!).advance(nowMs);
     this.emit({ type: "pacer_update", t: nowMs, snap });
   }
 
