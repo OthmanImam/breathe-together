@@ -1,8 +1,8 @@
-# Build log — Phase 1 (curated agent-session record)
+# Build log — Phases 1–3 (curated agent-session record)
 
-A sanitized, publication-ready record of the Phase 1 working session. This is
-the version meant to be embedded in an article; note at the bottom for how to
-produce it from the raw agent transcript.
+A sanitized, publication-ready record of the working sessions. This is
+the version meant to be embedded in an article; note at the bottom for how
+to produce it from the raw agent transcript.
 
 ## Session facts
 
@@ -13,53 +13,43 @@ produce it from the raw agent transcript.
   `node --test` runner (with `tsx`), simulation runs for all five mock
   scenarios.
 
-## Step-by-step (commit-per-step history)
+## Phase 2–3 addendum (server, UI, consent, real SDK, pair mode)
 
-1. `docs(step0)` — SmartSpectra Node.js SDK research. Fetched the
-   `smartspectra.presagetech.com` pages (`/docs/nodejs`, `api-reference`,
-   `metrics`, `telemetry-and-privacy`) with `.md` suffix. Key finds recorded
-   in `docs/SDK_NOTES.md`: pure-FFI `koffi` binding (no node-gyp), API key is
-   constructor-injected (no env-var contract), metric bundles & payload paths
-   (`metrics.breathing?.rate?.at(-1)?.value` etc.), `ValidationCode` values
-   mapping ~1:1 onto the report statuses we need, timestamps in µs and an
-   explicit warning about non-monotonic wall clocks, per-platform native
-   packages, opt-out `enableTelemetry` (defaults ON), and "native SDK state
-   is process-global". Wrote 8 open questions (airing unverified claims —
-   e.g. the reported 30 fps frontend-frame instability was NOT verifiable
-   from the consulted pages, though the docs' own back-pressure/perf notes
-   second the planned child-process isolation).
-2. `chore(step1)` — scaffold: TS strict + ESM, `tsx`, `node --test`,
-   eslint flat config, prettier, README (wellness disclaimer), `.env.example`
-   with no secrets, `.gitignore` (`.env` ignored).
-3. `feat(step2)` — signal contract + normalizer. Everywhere time comes from
-   injected samples/clocks — no `Date.now()` — so simulations run accelerated
-   and seeded. Normalizer: per-channel EMA, plausibility bounds, per-second
-   spike cap, confidence gate, hold-then-lost, long-gap reset.
-4. `feat(step3)` — mock source: mulberry32 seeding, five scenarios,
-   first-order lag toward the pacer (via `setPacerRate`), dropout = silence
-   (not fake data), poor-light = low-confidence `poor_light`.
-5. `feat(step4)` — pacer as a pure function of elapsed time. Rate changes
-   only commit at the next cycle boundary, so no breath is ever distorted
-   mid-inhale.
-6. `feat(step5)` — coach state machine: calibrate (median or gentle default +
-   setup notice), match, lead (windowed evaluation, one 0.5 bpm step at a
-   time down to the 7 bpm floor), hold (10 s divergence triggers it, one
-   gentle notice, no ratcheting down; slow ease-up toward a ceiling after two
-   unproductive windows), signal-lost overlay (steady pace, notices on loss
-   and recovery), cooldown, and an observation-only summary whose wording is
-   regression-tested against a restricted-terms list.
-7. `feat(step6)` — headless CLI + harness wiring
-   (mock → normalizer → coach → pacer) on a virtual clock stepped at 1 Hz;
-   same-seed replay asserted byte-identical.
-8. `docs(step7)` — architecture write-up: data-flow diagram, invariants
-   ("slow control loop, confidence-gated, never scold"), Phase 2 plan.
-9. `chore` — wording sweep: removed restricted vocabulary from comments/docs
-   outside the ban-list and the mandated disclaimer.
-10. `feat` (review pass) — after a full read-through of all five timelines:
-    deduped degenerate summary ranges ("read near 11.7" instead of
-    "between 11.7 and 11.7"), and added a neutral "kept its own pace" line
-    for sessions where the person diverged the whole way, plus a regression
-    test pinning the never-ratchet invariant.
+The Phase 1 steps above are condensed from the first working session; the
+full step-by-step record is in git history. What followed, in the same
+process (commit per step, 97→128 tests):
+
+- **Step 0 trap caught before code:** the prompt assumed the camera path
+  would be SDK-owned. Re-reading the live docs showed `useCamera` exists —
+  the design instead put the camera in the browser (the consent prompt and
+  preview need it) and feeds frames via the documented `useCustomInput`
+  path. Electron was considered and rejected with reasons. That one
+  decision shaped every later step.
+- **A real bug found by the user, not the tests:** the client's `hello`
+  was sent while the socket was still CONNECTING and silently dropped —
+  sessions never started in a real browser. Fixed with an outbound queue
+  and a regression test that reproduces the race. Found because a human
+  actually used the app.
+- **Live SDK findings:** the real `@smartspectra/node-sdk` loads natively
+  (win32-x64 + linux-x64), discovered the webcam, authenticated with a
+  real key, and emitted genuine validation codes. It also wedged on
+  `kProcessingFailed` with synthetic frames — recovery (`reset()` +
+  re-select input + restart) implemented and test-verified. A container
+  run showed the auth server refusing pairing/authorization from
+  datacenter egress (403s) — the app degraded to guide-only instead of
+  faking a signal, exactly as the rules require.
+- **Coach math updated from docs:** breathing rate is a 30-second trailing
+  average (confidence 0 until the window fills), so Hold was made
+  trend-aware (35 s sustained-divergence streak + convergence reset) and
+  the mock rebuilt to report the same 30 s window. The naïve version
+  would have punished users for following "too slowly" — the lag, not the
+  person, was the problem.
+- **Pair mode (Phase 3)** reused everything: expiring room codes,
+  per-participant pipelines on the same substrate, one shared pacer (max
+  of solo proposals — the gentle one wins), an alignment metric that
+  freezes on signal loss, quota counted per participant-minute with
+  pre-start refusal, and an UNVALIDATED-marking policy for every
+  threshold with no real-face data yet.
 
 ## Honest debugging beats (why judges like these)
 
