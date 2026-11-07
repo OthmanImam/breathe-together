@@ -20,8 +20,31 @@ import type {
   ServerMessage,
 } from "../server/protocol.js";
 
-const SCREENS = ["consent", "setup", "session", "summary"] as const;
+const SCREENS = ["consent", "setup", "lobby", "session", "summary"] as const;
 type Screen = (typeof SCREENS)[number];
+
+const PAIR_BAND_COPY: Record<string, { line: string; detail: string }> = {
+  mostly: {
+    line: "Across the session, the two measured breathing rates were mostly similar.",
+    detail:
+      "The score blends how close the two reported breathing rates were to each other and how closely each matched the shared pacing guide. It says nothing about anything but those two numbers.",
+  },
+  partly: {
+    line: "Across the session, the two measured breathing rates were partly similar.",
+    detail:
+      "The score blends how close the two reported breathing rates were to each other and how closely each matched the shared pacing guide. It says nothing about anything but those two numbers.",
+  },
+  different: {
+    line: "Across the session, the two measured breathing rates were different.",
+    detail:
+      "The score blends how close the two reported breathing rates were to each other and how closely each matched the shared pacing guide. It says nothing about anything but those two numbers.",
+  },
+  none: {
+    line: "The session didn't record a shared alignment view.",
+    detail:
+      "Alignment needs a clear view of both people for most of the session. Nothing was measured, so nothing is claimed.",
+  },
+};
 
 const STATE_LABELS: Record<string, string> = {
   calibrate: "Settling in",
@@ -63,6 +86,21 @@ class App {
   private devScenario = "agitated_then_settling";
   private devControls = false;
 
+  // -- pair state ------------------------------------------------------------
+  private pairMode = false;
+  private pairActive = false;
+  private isHost = false;
+  private roomCode = "";
+  private selfLabel = "";
+  private roster: Array<{
+    id: string;
+    label: string;
+    ready: boolean;
+    consent: boolean;
+  }> = [];
+  private alignment: { value?: number; stale: boolean; waiting: boolean } | undefined;
+  private pairSummary: { band: string } | undefined;
+
   // Latest pacer snapshot for rAF interpolation between 10 Hz updates.
   private lastPacer: {
     rate: number;
@@ -91,8 +129,7 @@ class App {
   private wireUi(): void {
     el<HTMLButtonElement>("consent-button").addEventListener("click", () =>
       void this.handleConsent(),
-    );
-    el<HTMLButtonElement>("guide-only-button").addEventListener("click", () =>
+    );    el<HTMLButtonElement>("guide-only-button").addEventListener("click", () =>
       this.handleGuideOnly(),
     );
     el<HTMLButtonElement>("reconnect-button").addEventListener("click", () => {
@@ -106,6 +143,58 @@ class App {
     el<HTMLButtonElement>("stop-button").addEventListener("click", () =>
       this.handleStop(),
     );
+    el<HTMLButtonElement>("create-room-button").addEventListener("click", () => {
+      this.selfLabel = el<HTMLInputElement>("pair-label").value.trim();
+      this.ws.send({ type: "create_room" });
+    });
+    el<HTMLButtonElement>("join-room-button").addEventListener("click", () => {
+      const code = el<HTMLInputElement>("pair-code-input").value.trim().toUpperCase();
+      this.selfLabel = el<HTMLInputElement>("pair-label").value.trim();
+      el("pair-room-error").hidden = true;
+      if (code.length < 1) {
+        el("pair-room-error").textContent = "Enter the room code your partner shared.";
+        el("pair-room-error").hidden = false;
+        return;
+      }
+      this.ws.send({
+        type: "join_room",
+        code,
+        ...(this.selfLabel ? { label: this.selfLabel } : {}),
+      });
+    });
+    el<HTMLButtonElement>("ready-button").addEventListener("click", () => {
+      this.audio.ensureStarted(); // joiner's user gesture for audio
+      this.ws.send({
+        type: "participant_ready",
+        ready: true,
+        ...(this.selfLabel ? { label: this.selfLabel } : {}),
+      });
+      el<HTMLButtonElement>("ready-button").disabled = true;
+    });
+    el<HTMLButtonElement>("host-start-button").addEventListener("click", () => {
+      this.audio.ensureStarted();
+      this.ws.send({ type: "host_start", durationMin: this.durationMin });
+    });
+    const leaveRoom = (): void => {
+      this.ws.send({ type: "leave_room" });
+      this.pairActive = false;
+      this.camera.stop();
+      this.stopFrameLoop();
+      this.audio.stop();
+      this.consentGranted = false;
+      el("camera-indicator").hidden = true;
+      el("stop-button").hidden = true;
+      this.showScreen("consent");
+    };
+    el<HTMLButtonElement>("leave-room-button").addEventListener("click", leaveRoom);
+    el<HTMLButtonElement>("leave-room-button-2").addEventListener("click", leaveRoom);
+    el<HTMLInputElement>("share-toggle").addEventListener("change", (ev) => {
+      const on = (ev.target as HTMLInputElement).checked;
+      this.ws.send({ type: "share_rate_toggle", share: on });
+      el("session-notice").textContent = on
+        ? "Sharing your breathing rate with your partner."
+        : "Sharing is off. Only the shared visual is visible to your partner.";
+    });
     el<HTMLButtonElement>("begin-button").addEventListener("click", () =>
       this.handleBegin(),
     );
@@ -141,6 +230,16 @@ class App {
         }),
       );
 
+    document
+      .querySelectorAll<HTMLInputElement>('input[name="mode"]')
+      .forEach((radio) =>
+        radio.addEventListener("change", () => {
+          this.pairMode = radio.value === "pair";
+          this.applyModeUi();
+        }),
+      );
+    this.applyModeUi();
+
     el<HTMLSelectElement>("dev-scenario").addEventListener("change", (ev) => {
       this.devScenario = (ev.target as HTMLSelectElement).value;
       this.ws.send({ type: "set_scenario", scenario: this.devScenario });
@@ -155,6 +254,28 @@ class App {
     // eyes-closed sessions); the orb resyncs from server timestamps on
     // return because interpolation always measures against the last update.
     document.addEventListener("visibilitychange", () => undefined);
+  }
+
+  private applyModeUi(): void {
+    el("pair-options").hidden = !this.pairMode;
+    el<HTMLButtonElement>("begin-button").hidden = this.pairMode;
+    const radios = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[name="duration"]'),
+    );
+    if (this.pairMode) {
+      for (const radio of radios) {
+        radio.disabled = radio.value === "10";
+        if (radio.value === "10" && radio.checked) {
+          (
+            document.querySelector('input[name="duration"][value="3"]') as HTMLInputElement | null
+          )?.click();
+        }
+      }
+    } else {
+      for (const radio of radios) {
+        radio.disabled = false;
+      }
+    }
   }
 
   private showScreen(name: Screen): void {
@@ -174,6 +295,13 @@ class App {
   private async handleConsent(): Promise<void> {
     el("camera-error").hidden = true;
     el("guide-only-button").hidden = true;
+    if (!window.isSecureContext) {
+      this.showError(
+        "This page isn't a secure connection, so the camera can't start. Open the app on the host's own computer, or via HTTPS (for example a secure tunnel) — then try again.",
+      );
+      el("guide-only-button").hidden = false;
+      return;
+    }
     const video = el<HTMLVideoElement>("preview-video");
     try {
       await this.camera.start(video);
@@ -264,7 +392,86 @@ class App {
     });
     this.showScreen("session");
     el("session-notice").textContent = "";
+    this.setPairVisuals(false);
     this.startOrbLoop();
+  }
+
+  private setPairVisuals(on: boolean): void {
+    el("pair-visual").hidden = !on;
+    el("solo-visual").hidden = on;
+    el("pair-alignment").hidden = !on;
+    el("share-row").hidden = !on;
+    el("peer-rate").hidden = true;
+    el("opt-align-pct").closest("label")!.hidden = !on;
+  }
+
+  private renderLobby(msg: Extract<ServerMessage, { type: "room_state" }>): void {
+    el("room-code").textContent = msg.code ?? "——";
+    const list = el("lobby-participants");
+    list.replaceChildren();
+    for (const p of msg.participants) {
+      const li = document.createElement("li");
+      const who = document.createElement("span");
+      who.textContent = `${p.label}${p.id === msg.hostId ? " (host)" : ""}`;
+      const state = document.createElement("span");
+      state.textContent = p.consent && p.ready ? "Ready" : "Not ready yet";
+      li.append(who, state);
+      list.appendChild(li);
+    }
+    el("lobby-quota").textContent =
+      msg.quotaRemainingMin !== undefined
+        ? `Measurement time left today: about ${msg.quotaRemainingMin} minutes (counted per person).`
+        : "";
+    const bothReady =
+      msg.participants.length >= 2 &&
+      msg.participants.every((p) => p.consent && p.ready);
+    el("host-start-button").hidden = !(msg.hostId && bothReady);
+    el("lobby-guidance").textContent =
+      msg.phase === "session"
+        ? "The session is starting…"
+        : msg.participants.length < 2
+          ? "Waiting for your partner to join with the room code."
+          : bothReady
+            ? "Everyone is ready. The host can start."
+            : "When both people are ready, the host can start.";
+    this.roster = msg.participants;
+    if (msg.phase === "session") {
+      this.sessionActive = true;
+      this.sessionStartedAt = performance.now();
+      this.pairActive = true;
+      this.showScreen("session");
+      el("session-notice").textContent = "";
+      this.setPairVisuals(true);
+      this.startOrbLoop();
+    } else {
+      this.showScreen("lobby");
+    }
+  }
+
+  private renderAlignment(): void {
+    const a = this.alignment;
+    const line = el("pair-alignment");
+    if (!a || a.waiting) {
+      line.textContent = "Waiting for signal…";
+      el("shared-glow").style.opacity = "0";
+      return;
+    }
+    const bandCopy = a.value !== undefined && a.value >= 0.8
+      ? "Rates look mostly similar."
+      : a.value !== undefined && a.value >= 0.45
+        ? "Rates are becoming similar."
+        : "Rates look different for now.";
+    const pct = el<HTMLInputElement>("opt-align-pct").checked && a.value !== undefined
+      ? ` (${Math.round(a.value * 100)}%)`
+      : "";
+    line.textContent = a.stale
+      ? "Waiting for a clear view to resume…"
+      : bandCopy + pct;
+    el("shared-glow").style.opacity = String(0.15 + 0.65 * (a.value ?? 0));
+    const pair = el("orb-pair");
+    const apart = 4 - 2.5 * (a.value ?? 0);
+    pair.style.gap = `${apart}rem`;
+    el("orb-peer").style.opacity = a.stale ? "0.4" : "0.85";
   }
 
   private onServerMessage(msg: ServerMessage): void {
@@ -279,6 +486,54 @@ class App {
         }
         break;
       }
+      case "room_created":
+        this.roomCode = msg.code;
+        this.isHost = true;
+        el("room-code").textContent = msg.code;
+        break;
+      case "room_state":
+        this.renderLobby(msg);
+        break;
+      case "alignment_update":
+        this.alignment = { value: msg.value, stale: msg.stale, waiting: msg.waiting };
+        this.renderAlignment();
+        break;
+      case "peer_status":
+        el("session-notice").textContent =
+          msg.kind === "joined"
+            ? `${msg.label} joined.`
+            : msg.kind === "left"
+              ? `${msg.label} left. The guide keeps running for you.`
+              : msg.kind === "signal-lost"
+                ? `Waiting for ${msg.label}'s signal…`
+                : `${msg.label}'s signal is back.`;
+        break;
+      case "peer_rate": {
+        const peerRate = el("peer-rate");
+        peerRate.textContent = `${msg.label} is pacing at about ${Math.round(msg.rate)} breaths a minute.`;
+        peerRate.hidden = false;
+        break;
+      }
+      case "peer_left":
+        el("session-notice").textContent =
+          `${msg.label} left. The guide keeps running for you — no pressure to stay.`;
+        el("orb-peer").style.opacity = "0.3";
+        break;
+      case "room_closed":
+        this.pairActive = false;
+        this.sessionActive = false;
+        this.camera.stop();
+        this.stopFrameLoop();
+        this.audio.stop();
+        el("camera-indicator").hidden = true;
+        el("stop-button").hidden = true;
+        el("session-notice").textContent = msg.reason;
+        this.showError(msg.reason);
+        this.showScreen("consent");
+        break;
+      case "pair_summary":
+        this.pairSummary = { band: msg.band };
+        break;
       case "sample":
         this.onSample(msg.sample);
         break;
@@ -368,7 +623,6 @@ class App {
   }
 
   private orbTick(): void {
-    const orb = el("orb");
     const reduced = el<HTMLInputElement>("opt-reduced-motion").checked;
     const audioOnly = el<HTMLInputElement>("opt-audio-only").checked;
     const p = this.lastPacer;
@@ -381,7 +635,14 @@ class App {
         DEFAULT_SETTINGS.pacer.inhaleShare,
         reduced,
       );
-      orb.style.transform = `scale(${state.scale})`;
+      // Pair mode: both orbs follow the SAME shared pacer (phase-locked).
+      const orbs = this.pairActive
+        ? [el("orb-self"), el("orb-peer")]
+        : [el("orb")];
+      for (const orb of orbs) {
+        orb.style.transform = `scale(${state.scale})`;
+        orb.style.visibility = audioOnly ? "hidden" : "visible";
+      }
       const phaseText = el("session-phase");
       phaseText.textContent = audioOnly
         ? state.phase === "inhale"
@@ -389,11 +650,8 @@ class App {
           : "Breathe out…"
         : "";
       // Text alternative for the visual, kept current for assistive tech.
-      orb.setAttribute(
-        "aria-label",
-        `Breathing guide: ${state.phase === "inhale" ? "breathe in" : "breathe out"}`,
-      );
-      orb.style.visibility = audioOnly ? "hidden" : "visible";
+      const label = `Breathing guide: ${state.phase === "inhale" ? "breathe in" : "breathe out"}`;
+      for (const orb of orbs) orb.setAttribute("aria-label", label);
     }
     this.rafId = requestAnimationFrame(() => this.orbTick());
   }
@@ -430,6 +688,17 @@ class App {
       const p = document.createElement("p");
       p.textContent = line;
       container.appendChild(p);
+    }
+    // Pair: add the alignment band (observation-only definition included).
+    const pairBox = el("pair-summary");
+    if (this.pairSummary) {
+      pairBox.hidden = false;
+      const copy = PAIR_BAND_COPY[this.pairSummary.band] ?? PAIR_BAND_COPY["none"]!;
+      el("pair-band-line").textContent = copy.line;
+      el("pair-band-detail").textContent = copy.detail;
+      this.pairSummary = undefined;
+    } else {
+      pairBox.hidden = true;
     }
     // Opt-in history (OFF by default): only stored when the user enables it
     // in the future; "Delete my data" clears whatever is here.

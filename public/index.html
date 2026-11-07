@@ -51,6 +51,21 @@
             the camera permission and choose guide-only mode.
           </p>
         </details>
+        <details class="why-camera">
+          <summary>Breathe with someone — where do frames go?</summary>
+          <p>
+            In pair mode there is one host computer. If you <strong>create</strong>
+            the room, your partner's frames travel to <strong>your</strong>
+            computer; if you <strong>join</strong>, your frames travel to
+            <strong>your partner's</strong> computer. On that host machine they
+            are analyzed in memory and then discarded — never stored, and
+            never sent to your partner. Your partner sees only an abstract
+            picture (two orbs, and a shareable pace reading only if you turn
+            sharing on). Camera needs a secure connection: works directly on
+            the host's own computer, or via HTTPS (for example a secure
+            tunnel) from another device.
+          </p>
+        </details>
         <p id="camera-error" class="error-text" role="alert" hidden></p>
         <div class="actions">
           <button id="consent-button" class="button primary">I understand, start camera</button>
@@ -88,7 +103,22 @@
         <fieldset class="options">
           <legend>Mode</legend>
           <label><input type="radio" name="mode" value="solo" checked /> Breathe on my own</label>
-          <label class="disabled"><input type="radio" name="mode" value="pair" disabled /> Breathe with someone <span class="soon">(coming soon)</span></label>
+          <label><input type="radio" name="mode" value="pair" /> Breathe with someone</label>
+        </fieldset>
+
+        <fieldset class="options" id="pair-options" hidden>
+          <legend>Pair room</legend>
+          <label>Name shown to your partner <input type="text" id="pair-label" maxlength="24" placeholder="Your name" /></label>
+          <div class="actions">
+            <button id="create-room-button" class="button primary">Create room</button>
+          </div>
+          <label>Or join with a code
+            <span class="pair-join-row">
+              <input type="text" id="pair-code-input" maxlength="8" placeholder="ABC123" autocomplete="off" />
+              <button id="join-room-button" class="button secondary">Join</button>
+            </span>
+          </label>
+          <p id="pair-room-error" class="error-text" role="alert" hidden></p>
         </fieldset>
 
         <fieldset class="options" id="dev-panel" hidden>
@@ -108,15 +138,42 @@
         <button id="begin-button" class="button primary">Begin</button>
       </section>
 
+      <!-- Pair lobby: code, both people, ready states, host starts. -->
+      <section id="screen-lobby" class="screen" aria-labelledby="lobby-heading" hidden>
+        <h1 id="lobby-heading">Waiting together</h1>
+        <p>Room code: <strong id="room-code" class="room-code">——</strong></p>
+        <ul id="lobby-participants" class="participants"></ul>
+        <p id="lobby-quota" class="hint"></p>
+        <p id="lobby-guidance" class="guidance" aria-live="polite"></p>
+        <div class="actions">
+          <button id="ready-button" class="button secondary">I'm ready</button>
+          <button id="host-start-button" class="button primary" hidden>Start together</button>
+          <button id="leave-room-button" class="button secondary">Leave room</button>
+        </div>
+        <p id="lobby-error" class="error-text" role="alert" hidden></p>
+      </section>
+
       <!-- Session: pacer orb, rate, state, notices. -->
       <section id="screen-session" class="screen" aria-labelledby="session-state" hidden>
         <h1 id="session-state">Settling in</h1>
-        <div class="orb-wrap">
+        <div id="pair-visual" class="orb-wrap pair-visual" hidden>
+          <div class="orb-pair">
+            <div id="orb-peer" class="orb orb-peer" role="img" aria-label="Partner breathing guide"></div>
+            <div id="orb-self" class="orb" role="img" aria-label="Your breathing guide"></div>
+          </div>
+          <div id="shared-glow" class="shared-glow" aria-hidden="true"></div>
+        </div>
+        <div id="solo-visual" class="orb-wrap">
           <div id="orb" class="orb" role="img" aria-label="Breathing guide"></div>
         </div>
         <p id="session-phase" class="guidance" aria-hidden="true"></p>
+        <p id="pair-alignment" class="guidance" aria-live="polite" hidden></p>
+        <label class="volume" hidden>
+          <input type="checkbox" id="opt-align-pct" /> Show alignment as a small percentage
+        </label>
         <p class="session-stats">
           <span id="session-rate">Your pace: —</span>
+          <span id="peer-rate" hidden></span>
           <span id="session-view">View: —</span>
           <span id="session-time">—</span>
           <label class="volume">
@@ -124,6 +181,11 @@
             <input type="range" id="volume" min="0" max="100" value="30" />
           </label>
         </p>
+        <label class="share-row" id="share-row" hidden>
+          <input type="checkbox" id="share-toggle" />
+          Share my breathing rate with my partner (off by default, change anytime).
+          When on, they see a number like yours; when off, they see only the shared visual.
+        </label>
         <p id="session-notice" class="guidance" aria-live="polite"></p>
       </section>
 
@@ -131,8 +193,16 @@
       <section id="screen-summary" class="screen" aria-labelledby="summary-heading" hidden>
         <h1 id="summary-heading">Session note</h1>
         <div id="summary-lines"></div>
+        <div id="pair-summary" hidden>
+          <p id="pair-band-line"></p>
+          <details class="why-camera">
+            <summary>What does "similar" mean here?</summary>
+            <p id="pair-band-detail"></p>
+          </details>
+        </div>
         <div class="actions">
           <button id="again-button" class="button primary">Do it again</button>
+          <button id="leave-room-button-2" class="button secondary">Leave room</button>
           <button id="delete-button" class="button secondary">Delete my data</button>
         </div>
         <p id="delete-confirm" class="hint" role="status" hidden>Local history cleared.</p>
